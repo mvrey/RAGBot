@@ -173,6 +173,56 @@ def intelligent_chunking(text):
 
 question = 'Powershell'
 
+def text_search(query, dtc_fastapi):
+    index = Index(
+    text_fields=["chunk", "title", "description", "filename"],
+    keyword_fields=[]
+    )
+
+    index.fit(dtc_fastapi)
+
+    return index.search(query, num_results=5)
+
+
+def vector_search(query, dtc_fastapi):
+    embedding_model = SentenceTransformer('multi-qa-distilbert-cos-v1')
+    faq_embeddings = []
+    print(f"Encoding text:\n")
+
+    for d in tqdm(dtc_fastapi):
+        if 'content' not in d:
+            text = ''
+        else:
+            #TODO: replace the question with a set of possible questions that ought to be asked about about the docs. Let the llm suggest some possible questions.
+            text = '''question +''' ' ' + d['content']
+        v = embedding_model.encode(text)
+        faq_embeddings.append(v)
+
+    faq_embeddings = np.array(faq_embeddings)
+
+    faq_vindex = VectorSearch()
+    faq_vindex.fit(faq_embeddings, dtc_fastapi)
+
+    q = embedding_model.encode(query)
+    return faq_vindex.search(q, num_results=5)
+
+
+def hybrid_search(query, dtc_fastapi):
+    text_results = text_search(query, dtc_fastapi)
+    vector_results = vector_search(query, dtc_fastapi)
+    
+    # Combine and deduplicate results
+    seen_ids = set()
+    combined_results = []
+
+    for result in text_results + vector_results:
+        if result['filename'] not in seen_ids:
+            seen_ids.add(result['filename'])
+            combined_results.append(result)
+    
+    return combined_results
+
+
 
 ##########################################
 
@@ -183,6 +233,10 @@ print(f"FastAPI documents: {len(dtc_fastapi)}")
 
 processed_docs = 0
 skipped_docs = 0
+
+
+##########################################
+
 
 # Method 1: Sliding window simple chunking by characters
 '''
@@ -246,58 +300,13 @@ print(f"FastAPI chunks: {len(dtc_fastapi)}")
 #print(f"Sample chunk:\n{dtc_fastapi[100]}")
 
 
+##########################################
+
+
 #Index method 1 : Lexical search index
-'''
-index = Index(
-    text_fields=["chunk", "title", "description", "filename"],
-    keyword_fields=[]
-)
 
-index.fit(dtc_fastapi)
-
-results = index.search(question)
-print(f"Search results for question: '{results}'")
-'''
 
 #Index method 2: Semantic search index using sentence-transformers (vectors)
-embedding_model = SentenceTransformer('multi-qa-distilbert-cos-v1')
-
-print(f"Encoding text:\n")
-'''
-record = dtc_fastapi[2]
-#TODO: replace the question with a set of possible questions that ought to be asked about about the docs. Let the llm suggest some possible questions.
-text = question + ' ' + record['content']
-v_doc = embedding_model.encode(text)
-
-v_query = embedding_model.encode(question)
-
-print(f"Text encoded:\n")
-
-similarity = v_query.dot(v_doc)
-'''
-
-#print(f"Question + sample doc:\n{text}")
-
-faq_embeddings = []
-
-for d in tqdm(dtc_fastapi):
-    if 'content' not in d:
-        text = ''
-    else:
-        #TODO: replace the question with a set of possible questions that ought to be asked about about the docs. Let the llm suggest some possible questions.
-        text = '''question +''' ' ' + d['content']
-    v = embedding_model.encode(text)
-    faq_embeddings.append(v)
-
-faq_embeddings = np.array(faq_embeddings)
-
-faq_vindex = VectorSearch()
-faq_vindex.fit(faq_embeddings, dtc_fastapi)
 
 
-
-q = embedding_model.encode(question)
-results = faq_vindex.search(q)
-
-
-print(f"Search results for question: '{results}'")
+#Index method 3: Hybrid search index using both lexical and semantic search
