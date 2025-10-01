@@ -6,6 +6,14 @@ import frontmatter
 import re
 from tqdm import tqdm
 from openai import OpenAI
+from minsearch import Index
+from sentence_transformers import SentenceTransformer
+from tqdm.auto import tqdm
+import numpy as np
+from minsearch import VectorSearch
+
+
+
 
 
 ##########################################
@@ -13,7 +21,7 @@ from openai import OpenAI
 
 def read_repo_data(repo_owner, repo_name):
     prefix = 'https://codeload.github.com' 
-    url = f'{prefix}/{repo_owner}/{repo_name}/zip/refs/heads/master'
+    url = f'{prefix}/{repo_owner}/{repo_name}/zip/refs/heads/main'
     resp = requests.get(url)
     
     if resp.status_code != 200:
@@ -161,9 +169,15 @@ def intelligent_chunking(text):
 
 
 ##########################################
+# Day 3: Indexing and searching
+
+question = 'Powershell'
+
+
+##########################################
 
 #Read repo docs
-dtc_fastapi = read_repo_data('fastapi', 'fastapi')
+dtc_fastapi = read_repo_data('mvrey', 'RAGBot')
 
 print(f"FastAPI documents: {len(dtc_fastapi)}")
 
@@ -187,7 +201,7 @@ for doc in dtc_fastapi:
 '''
 
 # Method 2: Chunking by paragraphs
-'''
+
 for doc in dtc_fastapi:
     doc_copy = doc.copy()
     if 'content' not in doc_copy:
@@ -198,8 +212,8 @@ for doc in dtc_fastapi:
     doc_content = doc_copy.pop('content')
     chunks = chunk_by_paragraphs(doc_content)
     dtc_fastapi.extend(chunks)
-'''
 
+'''
 # Method 3: Chunking by markdown headings
 for doc in dtc_fastapi:
     doc_copy = doc.copy()
@@ -211,7 +225,7 @@ for doc in dtc_fastapi:
     doc_content = doc_copy.pop('content')
     chunks = split_markdown_by_level(doc_content, level=2)
     dtc_fastapi.extend(chunks)
-
+'''
 '''
 # Method 4: Intelligent chunking using LLM (e.g., GPT-4)
 for doc in tqdm(dtc_fastapi):
@@ -225,7 +239,65 @@ for doc in tqdm(dtc_fastapi):
         dtc_fastapi.append(section_doc)
 '''
 
+
 print(f"Processed documents: {processed_docs}, Skipped documents: {skipped_docs}")
 print(f"FastAPI chunks: {len(dtc_fastapi)}")
 
-print(f"Sample chunk:\n{dtc_fastapi[100]}")
+#print(f"Sample chunk:\n{dtc_fastapi[100]}")
+
+
+#Index method 1 : Lexical search index
+'''
+index = Index(
+    text_fields=["chunk", "title", "description", "filename"],
+    keyword_fields=[]
+)
+
+index.fit(dtc_fastapi)
+
+results = index.search(question)
+print(f"Search results for question: '{results}'")
+'''
+
+#Index method 2: Semantic search index using sentence-transformers (vectors)
+embedding_model = SentenceTransformer('multi-qa-distilbert-cos-v1')
+
+print(f"Encoding text:\n")
+'''
+record = dtc_fastapi[2]
+#TODO: replace the question with a set of possible questions that ought to be asked about about the docs. Let the llm suggest some possible questions.
+text = question + ' ' + record['content']
+v_doc = embedding_model.encode(text)
+
+v_query = embedding_model.encode(question)
+
+print(f"Text encoded:\n")
+
+similarity = v_query.dot(v_doc)
+'''
+
+#print(f"Question + sample doc:\n{text}")
+
+faq_embeddings = []
+
+for d in tqdm(dtc_fastapi):
+    if 'content' not in d:
+        text = ''
+    else:
+        #TODO: replace the question with a set of possible questions that ought to be asked about about the docs. Let the llm suggest some possible questions.
+        text = '''question +''' ' ' + d['content']
+    v = embedding_model.encode(text)
+    faq_embeddings.append(v)
+
+faq_embeddings = np.array(faq_embeddings)
+
+faq_vindex = VectorSearch()
+faq_vindex.fit(faq_embeddings, dtc_fastapi)
+
+
+
+q = embedding_model.encode(question)
+results = faq_vindex.search(q)
+
+
+print(f"Search results for question: '{results}'")
