@@ -19,15 +19,13 @@ class OpenAIAPI:
         return api_key
 
 
-    def llm(self, prompt):
-        messages = [
-            {"role": "user", "content": prompt}
-        ]
-
+    def send_prompt(self, messages, tool_list):
         openai_client = OpenAI(api_key=self.get_openai_api_key())
         response = openai_client.chat.completions.create(
             model=self.gpt_model,
             messages=messages
+            #TODO : Check if this works with no tools
+            tools=tool_list
         )
 
         return response.choices[0].message.content

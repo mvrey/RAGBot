@@ -10,6 +10,8 @@ import json
 import TechnicalDocumentation
 import TextChunker
 import TextSearcher
+import Prompts
+import OpenAIAPI
 
 
 ##########################################
@@ -95,24 +97,18 @@ text_search_tool = {
     }
 }
 
-system_prompt = """
-You are a helpful assistant for a course. 
-"""
-
-question = "What is particularly important to remember during this setup?"
-
 chat_messages = [
-    {"role": "system", "content": system_prompt},
-    {"role": "user", "content": question}
+    {"role": "system", "content": Prompts.SYSTEM_PROMPT},
+    {"role": "user", "content": Prompts.USER_PROMPT}
 ]
 
-response = openai_client.chat.completions.create(
-    model=gpt_model,
-    messages=chat_messages,
-    tools=[text_search_tool]
-)
+openai_api = OpenAIAPI()
+response =  openai_api.send_prompt(chat_messages, [text_search_tool])
 
 assistant_message = response.choices[0].message
+
+
+# EDIT FROM HERE
 
 if assistant_message.tool_calls:
     # Handle tool calls

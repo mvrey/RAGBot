@@ -56,7 +56,12 @@ class TextChunker:
     def intelligent_chunking(text):
         prompt = Prompts.CHUNKING_PROMPT.strip().format(document=text)
         openai_api = OpenAIAPI()
-        response = openai_api.llm(prompt)
+
+        messages = [
+            {"role": "user", "content": prompt}
+        ]
+
+        response = openai_api.send_prompt(messages)
         sections = response.split('---')
         sections = [s.strip() for s in sections if s.strip()]
         return sections
