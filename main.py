@@ -1,116 +1,19 @@
 import io
 import os
 import re
-from tqdm import tqdm
 from openai import OpenAI
 from minsearch import Index
-from sentence_transformers import SentenceTransformer
 from tqdm.auto import tqdm
 import numpy as np
-from minsearch import VectorSearch
 import json
 
 import TechnicalDocumentation
 import TextChunker
-import Prompts
-import OpenAIAPI
-
-
-gpt_model = 'gpt-4.1-nano'
-
-##########################################
-# Day 2: Chunking
-
-
-
-
-
-
-
-#Chunking using LLM (e.g., GPT-4)
-
-
-
-
-
-
-
-openai_api = OpenAIAPI()
-openai_client = OpenAI(api_key=openai_api.get_openai_api_key())
-
-
-# CONTINUE EDITING HERE
-
-def intelligent_chunking(text):
-    prompt = Prompts.CHUNKING_PROMPT.strip().format(document=text)
-    response = llm(prompt)
-    sections = response.split('---')
-    sections = [s.strip() for s in sections if s.strip()]
-    return sections
+import TextSearcher
 
 
 ##########################################
-# Day 3: Indexing and searching
-
-def text_search(query, dtc_fastapi):
-    index = Index(
-    text_fields=["chunk", "title", "description", "filename"],
-    keyword_fields=[]
-    )
-
-    index.fit(dtc_fastapi)
-
-    return index.search(query, num_results=2)
-
-
-def vector_search(query, dtc_fastapi):
-    embedding_model = SentenceTransformer('multi-qa-distilbert-cos-v1')
-    faq_embeddings = []
-    print(f"Encoding text:\n")
-
-    for d in tqdm(dtc_fastapi):
-        if 'content' not in d:
-            text = ''
-        else:
-            #TODO: replace the question with a set of possible questions that ought to be asked about about the docs. Let the llm suggest some possible questions.
-            text = '''question +''' ' ' + d['content']
-        v = embedding_model.encode(text)
-        faq_embeddings.append(v)
-
-    faq_embeddings = np.array(faq_embeddings)
-
-    faq_vindex = VectorSearch()
-    faq_vindex.fit(faq_embeddings, dtc_fastapi)
-
-    q = embedding_model.encode(query)
-    return faq_vindex.search(q, num_results=2)
-
-
-def hybrid_search(query, dtc_fastapi):
-    text_results = text_search(query, dtc_fastapi)
-    vector_results = vector_search(query, dtc_fastapi)
-    
-    # Combine and deduplicate results
-    seen_ids = set()
-    combined_results = []
-
-    for result in text_results + vector_results:
-        print(result)
-        if result['chunk'] not in seen_ids:
-            seen_ids.add(result['chunk'])
-            combined_results.append(result)
-    
-    return combined_results
-
-
-##########################################
-# Day 4: Agents and tools
-
-
-
-
-
-##########################################
+# Day 1: Read repo files
 
 #Read repo docs
 docs = TechnicalDocumentation('https://codeload.github.com/mvrey/RAGBot/zip/refs/heads/main')
@@ -119,9 +22,8 @@ dtc_fastapi = docs.get_repo_doc_files()
 print(f"Repository documents: {len(dtc_fastapi)}")
 
 
-
-
 ##########################################
+# Day 2: Chunking
 
 text_chunker = TextChunker("")
 
@@ -146,24 +48,33 @@ docs.llm_chunking()
 
 docs.print_summary()
 
+
 ##########################################
-'''
+# Day 3: Indexing and searching
+
+
 question = 'Powershell'
+text_searcher = TextSearcher()
 
 #Index method 1 : Lexical search index
+results = text_searcher.text_search(question, dtc_fastapi)
 
+# OR
 
 #Index method 2: Semantic search index using sentence-transformers (vectors)
+results = text_searcher.vector_search(question, dtc_fastapi)
 
+# OR
 
 #Index method 3: Hybrid search index using both lexical and semantic search
-results = hybrid_search(question, dtc_fastapi)
-print("Hybrid search results:\n")
+results = text_searcher.hybrid_search(question, dtc_fastapi)
+
+print("Search results:\n")
 print(results)
-'''
+
 
 ##########################################
-
+# Day 4: Agents and tools
 
 
 text_search_tool = {

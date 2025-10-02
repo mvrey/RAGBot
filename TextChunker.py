@@ -1,4 +1,6 @@
 import re
+import Prompts
+import OpenAIAPI
 
 class TextChunker:
 
@@ -48,4 +50,13 @@ class TextChunker:
             section = {'chunk': f'{header}\n\n{content}' if content else header}
             sections.append(section)
         
+        return sections
+    
+
+    def intelligent_chunking(text):
+        prompt = Prompts.CHUNKING_PROMPT.strip().format(document=text)
+        openai_api = OpenAIAPI()
+        response = openai_api.llm(prompt)
+        sections = response.split('---')
+        sections = [s.strip() for s in sections if s.strip()]
         return sections

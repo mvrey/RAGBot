@@ -1,4 +1,4 @@
-import openai
+from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from typing import Optional
@@ -7,8 +7,9 @@ from typing import Optional
 load_dotenv()
 
 class OpenAIAPI:
+    
     def __init__(self):
-        pass
+        self.gpt_model = 'gpt-4.1-nano'
 
 
     def get_openai_api_key(self):
@@ -17,16 +18,15 @@ class OpenAIAPI:
             raise ValueError("OPENAI_API_KEY environment variable is not set. Please check your .env file.")
         return api_key
 
-    openai_client = OpenAI(api_key=get_openai_api_key())
 
-
-    def llm(self, prompt, model=gpt_model):
+    def llm(self, prompt):
         messages = [
             {"role": "user", "content": prompt}
         ]
 
+        openai_client = OpenAI(api_key=self.get_openai_api_key())
         response = openai_client.chat.completions.create(
-            model=model,
+            model=self.gpt_model,
             messages=messages
         )
 

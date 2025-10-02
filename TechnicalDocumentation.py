@@ -93,7 +93,7 @@ class TechnicalDocumentation:
             doc_copy = doc.copy()
             doc_content = doc_copy.pop('content')
 
-            sections = intelligent_chunking(doc_content)
+            sections = self.chunker.intelligent_chunking(doc_content)
             for section in sections:
                 section_doc = doc_copy.copy()
                 section_doc['section'] = section
