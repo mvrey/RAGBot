@@ -11,7 +11,7 @@ from sentence_transformers import SentenceTransformer
 from tqdm.auto import tqdm
 import numpy as np
 from minsearch import VectorSearch
-
+import json
 
 
 
@@ -137,11 +137,15 @@ Another section content
 
 
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 def get_openai_api_key():
     api_key = os.getenv('OPENAI_API_KEY')
     if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable is not set")
+        raise ValueError("OPENAI_API_KEY environment variable is not set. Please check your .env file.")
     return api_key
 
 openai_client = OpenAI(api_key=get_openai_api_key())
@@ -171,8 +175,6 @@ def intelligent_chunking(text):
 ##########################################
 # Day 3: Indexing and searching
 
-question = 'Powershell'
-
 def text_search(query, dtc_fastapi):
     index = Index(
     text_fields=["chunk", "title", "description", "filename"],
@@ -181,7 +183,7 @@ def text_search(query, dtc_fastapi):
 
     index.fit(dtc_fastapi)
 
-    return index.search(query, num_results=5)
+    return index.search(query, num_results=2)
 
 
 def vector_search(query, dtc_fastapi):
@@ -204,7 +206,7 @@ def vector_search(query, dtc_fastapi):
     faq_vindex.fit(faq_embeddings, dtc_fastapi)
 
     q = embedding_model.encode(query)
-    return faq_vindex.search(q, num_results=5)
+    return faq_vindex.search(q, num_results=2)
 
 
 def hybrid_search(query, dtc_fastapi):
@@ -216,11 +218,18 @@ def hybrid_search(query, dtc_fastapi):
     combined_results = []
 
     for result in text_results + vector_results:
-        if result['filename'] not in seen_ids:
-            seen_ids.add(result['filename'])
+        print(result)
+        if result['chunk'] not in seen_ids:
+            seen_ids.add(result['chunk'])
             combined_results.append(result)
     
     return combined_results
+
+
+##########################################
+# Day 4: Agents and tools
+
+
 
 
 
@@ -301,7 +310,8 @@ print(f"FastAPI chunks: {len(dtc_fastapi)}")
 
 
 ##########################################
-
+'''
+question = 'Powershell'
 
 #Index method 1 : Lexical search index
 
@@ -310,3 +320,71 @@ print(f"FastAPI chunks: {len(dtc_fastapi)}")
 
 
 #Index method 3: Hybrid search index using both lexical and semantic search
+results = hybrid_search(question, dtc_fastapi)
+print("Hybrid search results:\n")
+print(results)
+'''
+
+##########################################
+
+
+
+text_search_tool = {
+    "type": "function",
+    "name": "text_search",
+    "description": "Search the FAQ database",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query text to look up in the course FAQ."
+            }
+        },
+        "required": ["query"],
+        "additionalProperties": False
+    }
+}
+
+system_prompt = """
+You are a helpful assistant for a course. 
+"""
+
+question = "Gimme the Powershell command"
+
+chat_messages = [
+    {"role": "system", "content": system_prompt},
+    {"role": "user", "content": question}
+]
+
+response = openai_client.responses.create(
+    model='gpt-4o-mini',
+    input=chat_messages,
+    tools=[text_search_tool]
+)
+
+##
+
+call = response.output[0]
+
+arguments = json.loads(call.arguments)
+result = text_search(**arguments)
+
+call_output = {
+    "type": "function_call_output",
+    "call_id": call.call_id,
+    "output": json.dumps(result),
+}
+
+##
+
+chat_messages.append(call)
+chat_messages.append(call_output)
+
+response = openai_client.responses.create(
+    model='gpt-4o-mini',
+    input=chat_messages,
+    tools=[text_search_tool]
+)
+
+print(response.output_text)
