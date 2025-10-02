@@ -367,12 +367,15 @@ response = openai_client.responses.create(
 
 call = response.output[0]
 
-arguments = json.loads(call.arguments)
-result = text_search(**arguments)
+#[ResponseOutputMessage(id='msg_063a84694f8714410068de58a572c481918058783caa7b82ea', content=[ResponseOutputText(annotations=[], text='Could you please specify what task or function you would like to accomplish with the PowerShell command? This will help me provide the specific command you need.', type='output_text', logprobs=[])], role='assistant', status='completed', type='message')]
+
+#arguments = json.loads(call.arguments)
+#result = text_search(**arguments)
+result = text_search(call.content[0].text, dtc_fastapi)
 
 call_output = {
     "type": "function_call_output",
-    "call_id": call.call_id,
+    "call_id": call.id,
     "output": json.dumps(result),
 }
 
