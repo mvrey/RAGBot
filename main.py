@@ -14,6 +14,7 @@ from minsearch import VectorSearch
 import json
 
 
+gpt_model = 'gpt-4.1-nano'
 
 
 ##########################################
@@ -151,17 +152,17 @@ def get_openai_api_key():
 openai_client = OpenAI(api_key=get_openai_api_key())
 
 
-def llm(prompt, model='gpt-3.5-turbo'):
+def llm(prompt, model=gpt_model):
     messages = [
         {"role": "user", "content": prompt}
     ]
 
-    response = openai_client.responses.create(
-        model='gpt-3.5-turbo',
-        input=messages
+    response = openai_client.chat.completions.create(
+        model=model,
+        messages=messages
     )
 
-    return response.output_text
+    return response.choices[0].message.content
 
 
 def intelligent_chunking(text):
@@ -331,18 +332,19 @@ print(results)
 
 text_search_tool = {
     "type": "function",
-    "name": "text_search",
-    "description": "Search the FAQ database",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query text to look up in the course FAQ."
-            }
-        },
-        "required": ["query"],
-        "additionalProperties": False
+    "function": {
+        "name": "text_search",
+        "description": "Search the FAQ database",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query text to look up in the course FAQ."
+                }
+            },
+            "required": ["query"]
+        }
     }
 }
 
@@ -350,44 +352,40 @@ system_prompt = """
 You are a helpful assistant for a course. 
 """
 
-question = "Gimme the Powershell command"
+question = "What is particularly important to remember during this setup?"
 
 chat_messages = [
     {"role": "system", "content": system_prompt},
     {"role": "user", "content": question}
 ]
 
-response = openai_client.responses.create(
-    model='gpt-4o-mini',
-    input=chat_messages,
+response = openai_client.chat.completions.create(
+    model=gpt_model,
+    messages=chat_messages,
     tools=[text_search_tool]
 )
 
-##
+assistant_message = response.choices[0].message
 
-call = response.output[0]
-
-#[ResponseOutputMessage(id='msg_063a84694f8714410068de58a572c481918058783caa7b82ea', content=[ResponseOutputText(annotations=[], text='Could you please specify what task or function you would like to accomplish with the PowerShell command? This will help me provide the specific command you need.', type='output_text', logprobs=[])], role='assistant', status='completed', type='message')]
-
-#arguments = json.loads(call.arguments)
-#result = text_search(**arguments)
-result = text_search(call.content[0].text, dtc_fastapi)
-
-call_output = {
-    "type": "function_call_output",
-    "call_id": call.id,
-    "output": json.dumps(result),
-}
-
-##
-
-chat_messages.append(call)
-chat_messages.append(call_output)
-
-response = openai_client.responses.create(
-    model='gpt-4o-mini',
-    input=chat_messages,
-    tools=[text_search_tool]
-)
-
-print(response.output_text)
+if assistant_message.tool_calls:
+    # Handle tool calls
+    tool_call = assistant_message.tool_calls[0]
+    
+    if tool_call.function.name == "text_search":
+        # Parse the function arguments
+        function_args = json.loads(tool_call.function.arguments)
+        result = text_search(function_args["query"], dtc_fastapi)
+        
+        # Add assistant's message and tool results to the conversation
+        chat_messages.append({"role": "assistant", "content": None, "tool_calls": [tool_call]})
+        chat_messages.append({"role": "tool", "content": json.dumps(result), "tool_call_id": tool_call.id})
+        
+        # Get the final response
+        final_response = openai_client.chat.completions.create(
+            model=gpt_model,
+            messages=chat_messages
+        )
+        print(final_response.choices[0].message.content)
+else:
+    # If no tool was called, just print the response
+    print(assistant_message.content)
