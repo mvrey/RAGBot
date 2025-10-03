@@ -1,10 +1,7 @@
-import json
-import TechnicalDocumentation
-import ChunkingStrategy
-import TextSearcher
-import SearchStrategy
-import Prompts
-import OpenAIAPI
+from src.TechnicalDocumentation import TechnicalDocumentation
+from src.ChunkingStrategy import ChunkingStrategy
+from src.SearchStrategy import SearchStrategy
+from src.Prompts import SYSTEM_PROMPT, USER_PROMPT
 
 
 ##########################################
@@ -39,57 +36,21 @@ print(results)
 ##########################################
 # Day 4: Agents and tools
 
+from typing import List, Any
+from pydantic_ai import Agent
+import asyncio
 
-text_search_tool = {
-    "type": "function",
-    "function": {
-        "name": "text_search",
-        "description": "Search the FAQ database",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query text to look up in the course FAQ."
-                }
-            },
-            "required": ["query"]
-        }
-    }
-}
+def text_search(dtc_fastapi, query: str) -> List[Any]:
+    return dtc_fastapi.search(query, num_results=5)
 
-chat_messages = [
-    {"role": "system", "content": Prompts.SYSTEM_PROMPT},
-    {"role": "user", "content": Prompts.USER_PROMPT}
-]
+agent = Agent(
+    name="faq_agent",
+    instructions=Prompts.SYSTEM_PROMPT,
+    tools=[text_search],
+    model='gpt-4o-mini'
+)
 
-openai_api = OpenAIAPI()
-response =  openai_api.send_prompt(chat_messages, [text_search_tool])
+result = asyncio.run(agent.run(user_prompt=Prompts.USER_PROMPT))
 
-assistant_message = response.choices[0].message
-
-
-# EDIT FROM HERE
-
-if assistant_message.tool_calls:
-    # Handle tool calls
-    tool_call = assistant_message.tool_calls[0]
-    
-    if tool_call.function.name == "text_search":
-        # Parse the function arguments
-        function_args = json.loads(tool_call.function.arguments)
-        result = text_search(function_args["query"], dtc_fastapi)
-        
-        # Add assistant's message and tool results to the conversation
-        chat_messages.append({"role": "assistant", "content": None, "tool_calls": [tool_call]})
-        chat_messages.append({"role": "tool", "content": json.dumps(result), "tool_call_id": tool_call.id})
-        
-        # Get the final response
-        final_response = openai_client.chat.completions.create(
-            model=gpt_model,
-            messages=chat_messages
-        )
-        print(final_response.choices[0].message.content)
-else:
-    # If no tool was called, just print the response
-    print(assistant_message.content)
+result.new_messages()
+print(result.final_response)

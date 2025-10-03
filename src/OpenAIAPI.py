@@ -1,7 +1,6 @@
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
-from typing import Optional
 
 # Load environment variables from .env file
 load_dotenv()
@@ -23,7 +22,7 @@ class OpenAIAPI:
         openai_client = OpenAI(api_key=self.get_openai_api_key())
         response = openai_client.chat.completions.create(
             model=self.gpt_model,
-            messages=messages
+            messages=messages,
             #TODO : Check if this works with no tools
             tools=tool_list
         )
