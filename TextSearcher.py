@@ -1,6 +1,9 @@
 from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 from minsearch import VectorSearch
+import numpy as np
+from index import Index
+
 
 class TextSearcher:
     
@@ -37,7 +40,7 @@ class TextSearcher:
         faq_vindex.fit(faq_embeddings, dtc_fastapi)
 
         q = embedding_model.encode(query)
-        return faq_vindex.search(q, num_results=2)
+        
 
 
     def hybrid_search(self, query, dtc_fastapi):

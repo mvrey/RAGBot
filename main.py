@@ -1,15 +1,8 @@
-import io
-import os
-import re
-from openai import OpenAI
-from minsearch import Index
-from tqdm.auto import tqdm
-import numpy as np
 import json
-
 import TechnicalDocumentation
-import TextChunker
+import ChunkingStrategy
 import TextSearcher
+import SearchStrategy
 import Prompts
 import OpenAIAPI
 
@@ -27,26 +20,8 @@ print(f"Repository documents: {len(dtc_fastapi)}")
 ##########################################
 # Day 2: Chunking
 
-text_chunker = TextChunker("")
-
-# Method 1: Sliding window simple chunking by characters
-docs.chunk_by_characters()
-
-# OR
-
-# Method 2: Chunking by paragraphs
-docs.chunk_by_paragraphs()
-
-# OR
-
-# Method 3: Chunking by markdown headings
-docs.chunk_by_markdown_headings()
-
-# OR
-
-# Method 4: Intelligent chunking using LLM (e.g., GPT-4)
-docs.llm_chunking()
-
+chunking_strategy = ChunkingStrategy()
+chunking_strategy.chunk(ChunkingStrategy.MARKDOWN, docs)
 
 docs.print_summary()
 
@@ -54,22 +29,8 @@ docs.print_summary()
 ##########################################
 # Day 3: Indexing and searching
 
-
-question = 'Powershell'
-text_searcher = TextSearcher()
-
-#Index method 1 : Lexical search index
-results = text_searcher.text_search(question, dtc_fastapi)
-
-# OR
-
-#Index method 2: Semantic search index using sentence-transformers (vectors)
-results = text_searcher.vector_search(question, dtc_fastapi)
-
-# OR
-
-#Index method 3: Hybrid search index using both lexical and semantic search
-results = text_searcher.hybrid_search(question, dtc_fastapi)
+search_strategy = SearchStrategy()
+results = search_strategy.execute_strategy(SearchStrategy.HYBRID, Prompts.USER_PROMPT, dtc_fastapi)
 
 print("Search results:\n")
 print(results)
