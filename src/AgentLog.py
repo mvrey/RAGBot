@@ -1,3 +1,5 @@
+import os
+import glob
 import json
 import secrets
 from pathlib import Path
@@ -63,6 +65,15 @@ class AgentLog:
             log_data['log_file'] = log_file
             return log_data
         
+
+    def load_latest_log_file(self):
+        log_files = glob.glob("./logs/*.json")
+        if not log_files:
+            raise FileNotFoundError("No log files found in ./logs")
+        latest_log = max(log_files, key=os.path.getctime)
+
+        return self.load_log_file(latest_log)
+
 
     def simplify_log_messages(self, messages):
         log_simplified = []

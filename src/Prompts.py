@@ -35,7 +35,7 @@ class Prompts:
         If the search doesn't return relevant results, let the user know and provide general guidance.
         """
 
-    USER_PROMPT = "What is particularly important to remember during this setup?"
+    USER_PROMPT = "If roses are red and violets are blue, what color is the heart of a medusa in middle earth?"
 
     EVALUATION_PROMPT = """
         Use this checklist to evaluate the quality of an AI agent's answer (<ANSWER>) to a user question (<QUESTION>).
@@ -63,5 +63,18 @@ class Prompts:
         <LOG>{log}</LOG>
         """
 
+    QUESTION_GENERATION_PROMPT = """
+        You are helping to create test questions for the documentation provided.
+
+        Based on the provided content, generate realistic questions that users might ask.
+
+        The questions should:
+
+        - Be natural and varied in style
+        - Range from simple to complex
+        - Include both specific technical questions and general course questions
+
+        Generate one question for each record.
+        """
 
     
