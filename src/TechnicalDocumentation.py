@@ -1,3 +1,4 @@
+import io
 import zipfile        
 import requests
 import frontmatter
@@ -7,7 +8,7 @@ from src.TextChunker import TextChunker
 class TechnicalDocumentation:
     
     def __init__(self, zip_path: str):
-        self.repo_path = zip_path
+        self.zip_path = zip_path
         self.files_dictionary = []
         self.chunker = TextChunker("")
         self.processed_docs = 0
@@ -43,6 +44,7 @@ class TechnicalDocumentation:
                 continue
         
         zf.close()
+        self.files_dictionary = repository_data
         return repository_data
     
 
@@ -65,25 +67,25 @@ class TechnicalDocumentation:
         for doc in self.files_dictionary:
             doc_copy = doc.copy()
             if 'content' not in doc_copy:
-                skipped_docs += 1
+                self.skipped_docs += 1
                 continue
             
-            processed_docs += 1
+            self.processed_docs += 1
             doc_content = doc_copy.pop('content')
             chunks = self.chunker.chunk_by_paragraphs(doc_content)
             self.files_dictionary.extend(chunks)
 
 
-    def chunk_by_markdown_headings(self, level=2):
+    def chunk_by_markdown_headings(self):
         for doc in self.files_dictionary:
             doc_copy = doc.copy()
             if 'content' not in doc_copy:
-                skipped_docs += 1
+                self.skipped_docs += 1
                 continue
             
-            processed_docs += 1
+            self.processed_docs += 1
             doc_content = doc_copy.pop('content')
-            chunks = self.chunker.split_markdown_by_level(doc_content, level=2)
+            chunks = self.chunker.split_markdown_by_level(doc_content)
             self.files_dictionary.extend(chunks)
 
 

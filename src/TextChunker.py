@@ -30,7 +30,9 @@ class TextChunker:
     
 
     #chunking by levels of headings
-    def split_markdown_by_level(self):
+    def split_markdown_by_level(self, text):
+        level = 2  # You can adjust this to change the heading level
+
         header_pattern = r'^(#{' + str(level) + r'} )(.+)$'
         pattern = re.compile(header_pattern, re.MULTILINE)
 

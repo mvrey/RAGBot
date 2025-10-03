@@ -2,7 +2,7 @@ from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 from minsearch import VectorSearch
 import numpy as np
-from index import Index
+from minsearch import Index
 
 
 class TextSearcher:
@@ -51,6 +51,9 @@ class TextSearcher:
         seen_ids = set()
         combined_results = []
 
+        text_results = text_results or []
+        vector_results = vector_results or []
+        
         for result in text_results + vector_results:
             print(result)
             if result['chunk'] not in seen_ids:
