@@ -1,5 +1,4 @@
 from typing import List, Any, Dict
-import asyncio
 from pydantic_ai import Agent
 from src.SearchStrategy import SearchStrategy, SearchStrategyType
 
@@ -34,6 +33,7 @@ class AgentWrapper:
         
         self.text_search = text_search
 
+
     def setup(self, instructions: str) -> None:
         self.agent = Agent(
             name=self.agent_name,
@@ -41,6 +41,7 @@ class AgentWrapper:
             tools=[self.text_search],
             model=self.model
         )
+
 
     async def run(self, prompt: str) -> Dict:
         if not self.agent:
@@ -51,6 +52,7 @@ class AgentWrapper:
             'conversation': result.all_messages(),
             'response': result.output
         }
+
 
     def print_results(self, result: Dict) -> None:
         print("Conversation History:")

@@ -4,6 +4,7 @@ from src.ChunkingStrategy import ChunkingStrategy
 from src.SearchStrategy import SearchStrategy, SearchStrategyType
 from src.Prompts import Prompts
 from src.AgentWrapper import AgentWrapper
+from src.AgentLog import AgentLog
 
 
 ##########################################
@@ -44,3 +45,10 @@ agent_wrapper.setup(Prompts.SYSTEM_PROMPT)
 result = asyncio.run(agent_wrapper.run(Prompts.USER_PROMPT))
 
 agent_wrapper.print_results(result)
+
+
+##########################################
+# Day 5: Logging and evaluation
+
+agent_log = AgentLog()
+agent_log.log_interaction_to_file(agent_wrapper.agent, result['conversation'])
