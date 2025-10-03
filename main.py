@@ -1,4 +1,5 @@
 import asyncio
+import json
 from src.TechnicalDocumentation import TechnicalDocumentation
 from src.ChunkingStrategy import ChunkingStrategy
 from src.SearchStrategy import SearchStrategy, SearchStrategyType
@@ -50,5 +51,35 @@ agent_wrapper.print_results(result)
 ##########################################
 # Day 5: Logging and evaluation
 
+### Log llm call
+
 agent_log = AgentLog()
 agent_log.log_interaction_to_file(agent_wrapper.agent, result['conversation'])
+
+### Evaluate llm response
+
+from src.EvaluationCheck import EvaluationChecklist
+from pydantic_ai import Agent
+
+log_record = agent_log.load_log_file('./logs/faq_agent_20251003_112139_6e2e73.json')
+
+user_prompt = Prompts.USER_EVALUATION_PROMPT_FORMAT.format(
+    instructions = log_record['system_prompt'],
+    question = log_record['messages'][0]['parts'][0]['content'],
+    answer = log_record['messages'][-1]['parts'][0]['content'],
+    log = json.dumps(log_record['messages'])
+)
+
+eval_agent = Agent(
+    name='eval_agent',
+    model='gpt-4.1-mini',
+    instructions=Prompts.EVALUATION_PROMPT,
+    output_type=EvaluationChecklist
+)
+
+result = asyncio.run(agent_log.evaluate_log_record(eval_agent, log_record))
+
+print(result.summary)
+
+for check in result.checklist:
+    print(check)
