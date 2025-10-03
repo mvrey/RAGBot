@@ -1,7 +1,9 @@
+import asyncio
 from src.TechnicalDocumentation import TechnicalDocumentation
 from src.ChunkingStrategy import ChunkingStrategy
 from src.SearchStrategy import SearchStrategy, SearchStrategyType
 from src.Prompts import Prompts
+from src.AgentWrapper import AgentWrapper
 
 
 ##########################################
@@ -36,44 +38,9 @@ print(results)
 ##########################################
 # Day 4: Agents and tools
 
-from typing import List, Any
-from pydantic_ai import Agent
-import asyncio
+agent_wrapper = AgentWrapper(dtc_fastapi)
+agent_wrapper.setup(Prompts.SYSTEM_PROMPT)
 
-def text_search(query: str) -> List[Any]:
-    return search_strategy.execute_strategy(SearchStrategyType.TEXT, query, dtc_fastapi)
+result = asyncio.run(agent_wrapper.run(Prompts.USER_PROMPT))
 
-# Add schema information to the function
-text_search.schema = {
-    "name": "text_search",
-    "description": "Search through the documentation for relevant information",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "The search query to look up in the documentation"
-            }
-        },
-        "required": ["query"]
-    }
-}
-
-agent = Agent(
-    name="faq_agent",
-    instructions=Prompts.SYSTEM_PROMPT,
-    tools=[text_search],  # Pass the actual function with its schema
-    model='gpt-4.1-nano'
-)
-
-result = asyncio.run(agent.run(user_prompt=Prompts.USER_PROMPT))
-
-# Print all messages in the conversation
-print("Conversation History:")
-all_messages = result.all_messages()  # Call the method
-for message in all_messages:
-    print(f"\n{message}")
-
-# Print the final response
-print("\nFinal Response:")
-print(result.output)
+agent_wrapper.print_results(result)

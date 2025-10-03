@@ -22,6 +22,6 @@ class Prompts:
         ---
         """
     
-    SYSTEM_PROMPT = "You are a helpful assistant for a course."
+    SYSTEM_PROMPT = "You are a helpful assistant for searching through technical documentation."
 
     USER_PROMPT = "What is particularly important to remember during this setup?"
