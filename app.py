@@ -176,12 +176,11 @@ if st.session_state.agent_wrapper:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 response = asyncio.run(agent_wrapper.run(prompt))
-                answer = response['conversation'] if isinstance(response, dict) else str(response)
+                answer = response['conversation'][-1].parts[0].content
                 st.markdown(answer)
 
         st.session_state.messages.append({"role": "assistant", "content": answer})
-
-        # Log the interaction
+        
         agent_log.log_interaction_to_file(
             agent=agent_wrapper.agent,
             messages=response,
