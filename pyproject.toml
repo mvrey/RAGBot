@@ -1,14 +1,29 @@
-[tool.poetry]
-name = "ragbotus"
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ragbot"
 version = "0.1.0"
 description = "An interactive RAG system agent that allows to search through any repository documentation and get answers in natural language"
-authors = ["mvrey <marcos.vazquez.rey@gmail.com>"]
-packages = [{include = "ragboto"}]
+readme = "README.md"
+authors = [
+  { name = "mvrey", email = "marcos.vazquez.rey@gmail.com" },
+]
+requires-python = "==3.13.7"
+dependencies = [
+    "streamlit==1.50.0",
+    "sentence-transformers==5.1.1",
+    "openai==2.0.0",
+    "python-dotenv==1.1.1",
+    "pydantic-ai==1.0.14",
+    "pydantic==2.11.9",
+    "minsearch==0.0.5",
+    "requests==2.32.5",
+    "numpy==2.3.3",
+    "python-frontmatter==1.1.0",
+    "tqdm==4.67.1",
+]
 
-[tool.poetry.dependencies]
-python = "^3.9"
-
-
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+[tool.setuptools]
+packages = ["ragboto"]
