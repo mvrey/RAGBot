@@ -7,7 +7,7 @@ name = "ragbot"
 version = "0.1.0"
 description = "An interactive RAG system agent that allows to search through any repository documentation and get answers in natural language"
 readme = "README.md"
-requires-python = ">=3.8, !=3.9.7"  # Explicitly state the incompatibility
+requires-python = ">=3.9, !=3.9.7"  # Explicitly state the incompatibility
 dependencies = [
     "streamlit>=1.30.0",             # Upgrade streamlit to a newer version
     "sentence-transformers==5.1.1",
