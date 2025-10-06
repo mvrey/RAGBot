@@ -1,11 +1,11 @@
 import streamlit as st
 import asyncio
 
-from TechnicalDocumentation import TechnicalDocumentation
-from ChunkingStrategy import ChunkingStrategy
-from SearchStrategy import SearchStrategy, SearchStrategyType
-from AgentWrapper import AgentWrapper
-from AgentLog import AgentLog
+from ragboto.TechnicalDocumentation import TechnicalDocumentation
+from ragboto.ChunkingStrategy import ChunkingStrategy
+from ragboto.SearchStrategy import SearchStrategy, SearchStrategyType
+from ragboto.AgentWrapper import AgentWrapper
+from ragboto.AgentLog import AgentLog
 
 # --- Page config ---
 st.set_page_config(page_title="AI Documentation Assistant", page_icon="🤖", layout="centered")
