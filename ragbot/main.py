@@ -1,11 +1,11 @@
 import asyncio
 import json
-from src.TechnicalDocumentation import TechnicalDocumentation
-from src.ChunkingStrategy import ChunkingStrategy
-from src.SearchStrategy import SearchStrategy, SearchStrategyType
-from src.Prompts import Prompts
-from src.AgentWrapper import AgentWrapper
-from src.AgentLog import AgentLog
+from TechnicalDocumentation import TechnicalDocumentation
+from ChunkingStrategy import ChunkingStrategy
+from SearchStrategy import SearchStrategy, SearchStrategyType
+from Prompts import Prompts
+from AgentWrapper import AgentWrapper
+from AgentLog import AgentLog
 
 
 ##########################################
