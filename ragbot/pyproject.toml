@@ -14,10 +14,10 @@ dependencies = [
     "openai==2.0.0",
     "python-dotenv==1.1.1",
     "pydantic-ai==1.0.14",
-    "pydantic>=2.11.9",
+    "pydantic==2.11.9",
     "minsearch==0.0.5",
     "requests==2.32.5",
-    "numpy>=2.3.3",
+    "numpy==2.3.3",
     "python-frontmatter==1.1.0",
     "tqdm==4.67.1"
 ]
