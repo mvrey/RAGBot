@@ -183,7 +183,7 @@ if st.session_state.agent_wrapper:
         
         agent_log.log_interaction_to_file(
             agent=agent_wrapper.agent,
-            messages=response,
+            messages=response['conversation'],
             source='streamlit_chat'
         )
 else:
