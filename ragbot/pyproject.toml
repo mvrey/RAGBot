@@ -13,7 +13,7 @@ dependencies = [
     "sentence-transformers==5.1.1",
     "openai==2.0.0",
     "python-dotenv==1.1.1",
-    "pydantic-ai==1.10.14",
+    "pydantic-ai==1.0.14",
     "pydantic>=2.11.9",
     "minsearch==0.0.5",
     "requests==2.32.5",
