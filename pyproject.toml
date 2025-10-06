@@ -1,9 +1,13 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "RAGBot"
+name = "ragbot"
 version = "0.1.0"
 description = "An interactive RAG system agent that allows to search through any repository documentation and get answers in natural language"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.8"
 dependencies = [
     "minsearch>=0.0.5",
     "openai>=1.108.2",
