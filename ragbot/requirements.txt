@@ -1,22 +1,23 @@
-streamlit==1.28.0streamlit==1.28.0
+streamlit==1.28.0
 
-sentence-transformers==2.2.2sentence-transformers==2.2.2
+sentence-transformers==2.2.2
 
-openai==1.2.0openai==1.2.0
+openai==1.2.0
 
-python-dotenv==1.0.0python-dotenv==1.0.0
+python-dotenv==1.0.0
 
-pydantic-ai==1.0.0pydantic-ai==1.0.0
+pydantic-ai==1.0.0
 
-pydantic==2.4.2minsearch==0.1.0
+pydantic==2.4.2
 
-minsearch==0.1.0requests==2.31.0
+minsearch==0.1.0
 
-requests==2.31.0numpy==1.26.0
+requests==2.31.0
 
-numpy==1.26.0python-frontmatter==1.0.0
+numpy==1.26.0
 
-python-frontmatter==1.0.0tqdm==4.66.1
+python-frontmatter==1.0.0
 
-tqdm==4.66.1pydantic==2.4.2
+tqdm==4.66.1
+
 -e .
