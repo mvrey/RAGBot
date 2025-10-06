@@ -7,17 +7,17 @@ name = "ragbot"
 version = "0.1.0"
 description = "An interactive RAG system agent that allows to search through any repository documentation and get answers in natural language"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
-    "minsearch>=0.0.5",
-    "openai>=1.108.2",
+    "streamlit==1.28.0",
+    "sentence-transformers==5.1.1",
+    "openai==1.108.2",
+    "python-dotenv==1.0.0",
     "pydantic-ai==1.0.9",
-    "python-frontmatter>=1.1.0",
-    "requests>=2.32.5",
-    "sentence-transformers>=5.1.1"
-]
-
-[dependency-groups]
-dev = [
-    "jupyter>=1.1.1",
+    "pydantic>=2.11.2",
+    "minsearch==0.0.5",
+    "requests==2.32.5",
+    "numpy>=2.0.0",
+    "python-frontmatter==1.1.0",
+    "tqdm==4.66.1"
 ]
