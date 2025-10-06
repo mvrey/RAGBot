@@ -12,8 +12,18 @@ class AgentWrapper:
         self.search_strategy = SearchStrategy()
         self.agent = None
         
-        def text_search(query: str) -> List[Any]:
-            return self.search_strategy.execute_strategy(SearchStrategyType.TEXT, query, self.documents)
+        def text_search(query: str) -> str:
+            """Search the documentation and return formatted results."""
+            results = self.search_strategy.execute_strategy(SearchStrategyType.HYBRID, query, self.documents)
+            
+            # Format the results in a readable way
+            formatted_results = []
+            for idx, result in enumerate(results, 1):
+                chunk = result.get('chunk', '')
+                filename = result.get('filename', 'unknown file')
+                formatted_results.append(f"Result {idx} from {filename}:\n{chunk}\n")
+            
+            return "\n".join(formatted_results) if formatted_results else "No relevant information found."
         
         # Add schema to the function
         text_search.schema = {

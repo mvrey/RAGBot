@@ -33,7 +33,10 @@ search_method_name = st.selectbox(
 
 system_prompt = st.text_area(
     "📝 System Prompt (for agent):",
-    value="You are an AI assistant. Answer questions based on the repository."
+    value="""You are an AI assistant specialized in answering questions about repository documentation.
+Always search the documentation using the text_search tool before answering.
+Base your answers only on the information found in the documentation.
+If you can't find relevant information, say so."""
 )
 
 
