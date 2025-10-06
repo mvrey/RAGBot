@@ -1,11 +1,11 @@
 import asyncio
 import json
-from TechnicalDocumentation import TechnicalDocumentation
-from ChunkingStrategy import ChunkingStrategy
-from SearchStrategy import SearchStrategy, SearchStrategyType
-from Prompts import Prompts
-from AgentWrapper import AgentWrapper
-from AgentLog import AgentLog
+from ragbot.TechnicalDocumentation import TechnicalDocumentation
+from ragbot.ChunkingStrategy import ChunkingStrategy
+from ragbot.SearchStrategy import SearchStrategy, SearchStrategyType
+from ragbot.Prompts import Prompts
+from ragbot.AgentWrapper import AgentWrapper
+from ragbot.AgentLog import AgentLog
 
 
 ##########################################
