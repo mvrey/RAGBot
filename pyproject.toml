@@ -1,12 +1,16 @@
 [project]
-name = "course"
+name = "RAGBot"
 version = "0.1.0"
-description = "Add your description here"
+description = "An interactive RAG system agent that allows to search through any repository documentation and get answers in natural language"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "minsearch>=0.0.5",
+    "openai>=1.108.2",
+    "pydantic-ai==1.0.9",
     "python-frontmatter>=1.1.0",
     "requests>=2.32.5",
+    "sentence-transformers>=5.1.1"
 ]
 
 [dependency-groups]

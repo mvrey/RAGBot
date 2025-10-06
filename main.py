@@ -172,7 +172,7 @@ for log_record, eval_result in eval_results:
     rows.append(row)
 
 
-#Display the results and also calculate some statistics
+#Display the results and also calculate some statistics (Only works in Jupyter, not in a .py file)
 
 import pandas as pd
 
