@@ -1,6 +1,6 @@
 from typing import List, Any, Dict
 from pydantic_ai import Agent
-from src.SearchStrategy import SearchStrategy, SearchStrategyType
+from SearchStrategy import SearchStrategy, SearchStrategyType
 
 
 class AgentWrapper:

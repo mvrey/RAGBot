@@ -1,6 +1,6 @@
 from enum import Enum
 import numpy as np
-from src.TextSearcher import TextSearcher
+from TextSearcher import TextSearcher
 
 
 class SearchStrategyType(Enum):

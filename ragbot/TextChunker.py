@@ -1,6 +1,6 @@
 import re
-from src.Prompts import Prompts
-from src.OpenAIAPI import OpenAIAPI
+from Prompts import Prompts
+from OpenAIAPI import OpenAIAPI
 
 class TextChunker:
 

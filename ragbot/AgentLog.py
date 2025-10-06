@@ -5,8 +5,8 @@ import secrets
 from pathlib import Path
 from datetime import datetime
 from pydantic_ai.messages import ModelMessagesTypeAdapter
-from src.Prompts import Prompts
-from src.EvaluationCheck import EvaluationChecklist
+from Prompts import Prompts
+from EvaluationCheck import EvaluationChecklist
 
 LOG_DIR = Path('logs')
 LOG_DIR.mkdir(exist_ok=True)

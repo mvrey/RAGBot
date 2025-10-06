@@ -3,7 +3,7 @@ import zipfile
 import requests
 import frontmatter
 from tqdm import tqdm
-from src.TextChunker import TextChunker
+from TextChunker import TextChunker
 
 class TechnicalDocumentation:
     
