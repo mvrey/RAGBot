@@ -25,37 +25,74 @@ class TextChunker:
 
     #Chunking by paraghps
     def chunk_by_paragraphs(self, text):
-        paragraphs = re.split(r"\n\s*\n", text.strip())
-        return [{'chunk': p} for p in paragraphs]
-    
+        paragraphs = []
+        line_number = 1
+
+        for block in re.split(r"\n\s*\n", text):
+            block_lines = block.count('\n') + 1
+            if block.strip():
+                paragraphs.append({
+                    'chunk': block.strip(),
+                    'body': block.strip(),
+                    'symbol': '',
+                    'kind': 'paragraph',
+                    'start_line': line_number,
+                    'end_line': line_number + block_lines - 1,
+                })
+            # +1 for the blank line the split consumed.
+            line_number += block_lines + 1
+
+        return paragraphs
+
 
     #chunking by levels of headings
-    def split_markdown_by_level(self, text):
-        level = 2  # You can adjust this to change the heading level
+    def split_markdown_by_level(self, text, level=2):
+        """Split markdown at the given heading level, tracking line numbers.
 
-        header_pattern = r'^(#{' + str(level) + r'} )(.+)$'
-        pattern = re.compile(header_pattern, re.MULTILINE)
+        Line numbers matter as much here as they do for code: markdown answers get
+        cited the same way, so a section without a line range cannot be linked.
+        """
+        lines = text.splitlines()
+        heading_pattern = re.compile(r'^(#{' + str(level) + r'} )(.+)$')
 
-        # Split and keep the headers
-        parts = pattern.split(text)
-        
+        # Each boundary is where a section starts; the preamble before the first
+        # heading is a section too, otherwise intros go unindexed.
+        boundaries = []
+        for offset, line in enumerate(lines):
+            match = heading_pattern.match(line)
+            if match:
+                boundaries.append((offset, match.group(2).strip()))
+
+        if not boundaries:
+            return []
+
         sections = []
-        for i in range(1, len(parts), 3):
-            header = parts[i] + parts[i+1]  # "## " + "Title"
-            header = header.strip()
+        if boundaries[0][0] > 0:
+            sections.append(self._markdown_section(lines, 0, boundaries[0][0] - 1, ''))
 
-            # Get the content after this header
-            content = ""
-            if i+2 < len(parts):
-                content = parts[i+2].strip()
+        for index, (start, title) in enumerate(boundaries):
+            end = boundaries[index + 1][0] - 1 if index + 1 < len(boundaries) else len(lines) - 1
+            sections.append(self._markdown_section(lines, start, end, title))
 
-            section = {'chunk': f'{header}\n\n{content}' if content else header}
-            sections.append(section)
-        
-        return sections
-    
+        return [s for s in sections if s]
 
-    def intelligent_chunking(text):
+
+    def _markdown_section(self, lines, start, end, title):
+        body = '\n'.join(lines[start:end + 1]).strip()
+        if not body:
+            return None
+        return {
+            'chunk': body,
+            'body': body,
+            'symbol': title,
+            'kind': 'section',
+            'start_line': start + 1,
+            'end_line': end + 1,
+        }
+
+
+
+    def intelligent_chunking(self, text):
         prompt = Prompts.CHUNKING_PROMPT.strip().format(document=text)
         openai_api = OpenAIAPI()
 

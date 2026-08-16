@@ -8,8 +8,10 @@ from pydantic_ai.messages import ModelMessagesTypeAdapter
 from src.Prompts import Prompts
 from src.EvaluationCheck import EvaluationChecklist
 
-LOG_DIR = Path('logs')
-LOG_DIR.mkdir(exist_ok=True)
+# Anchored to the project root rather than the cwd, so logs land in one place
+# whether the app is launched from ragbot/ or the repo root.
+LOG_DIR = Path(__file__).resolve().parent.parent.parent / 'logs'
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class AgentLog:
@@ -67,9 +69,9 @@ class AgentLog:
         
 
     def load_latest_log_file(self):
-        log_files = glob.glob("./logs/*.json")
+        log_files = list(LOG_DIR.glob("*.json"))
         if not log_files:
-            raise FileNotFoundError("No log files found in ./logs")
+            raise FileNotFoundError(f"No log files found in {LOG_DIR}")
         latest_log = max(log_files, key=os.path.getctime)
 
         return self.load_log_file(latest_log)

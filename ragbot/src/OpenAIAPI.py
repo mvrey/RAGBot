@@ -18,13 +18,14 @@ class OpenAIAPI:
         return api_key
 
 
-    def send_prompt(self, messages, tool_list):
+    def send_prompt(self, messages, tool_list=None):
         openai_client = OpenAI(api_key=self.get_openai_api_key())
+        # The API rejects an explicit tools=None, so only pass it when there are tools.
+        optional_args = {'tools': tool_list} if tool_list else {}
         response = openai_client.chat.completions.create(
             model=self.gpt_model,
             messages=messages,
-            #TODO : Check if this works with no tools
-            tools=tool_list
+            **optional_args
         )
 
         return response.choices[0].message.content
