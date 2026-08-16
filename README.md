@@ -1,11 +1,27 @@
-# RAGBot
+# RAGBot — Code Documentation Assistant
 
 An LLM-powered RAG agent that ingests a GitHub repository — **source code and documentation** — and
 answers questions about it: how it works, where functionality lives, what the APIs and dependencies are.
 
+Built for **Option 2: Code Documentation Assistant**.
+
+| Assignment requirement | Section |
+|---|---|
+| a. Quick setup instructions | [a. Quick setup](#a-quick-setup) |
+| b. Architecture overview | [b. Architecture overview](#b-architecture-overview) |
+| c. Productionizing on a hyper-scaler | [c. Productionizing](#c-productionizing-on-a-hyper-scaler) |
+| d. RAG/LLM approach & decisions | [d. RAG / LLM approach & decisions](#d-rag--llm-approach--decisions) |
+| e. Key technical decisions and why | [e. Key technical decisions](#e-key-technical-decisions-and-why) |
+| f. Engineering standards followed / skipped | [f. Engineering standards](#f-engineering-standards-followed-and-skipped) |
+| g. How I used AI tools | [g. AI tools in development](#g-how-i-used-ai-tools-in-my-development-process) |
+| h. What I'd do differently with more time | [h. With more time](#h-what-id-do-differently-with-more-time) |
+| Screenshots / video | [Screenshots & demo](#screenshots--demo) |
+
+Also: [Known limitations](#known-limitations).
+
 ---
 
-## Quick setup
+## a. Quick setup
 
 **Requirements:** Python 3.13+ and an OpenAI API key (used for the chat model; embeddings run locally by default).
 
@@ -57,7 +73,7 @@ pytest
 
 ---
 
-## Architecture
+## b. Architecture overview
 
 ```
 GitHub zip ──► Repository ──► chunkers ──► SearchStrategy ──► AgentWrapper ──► Streamlit / CLI
@@ -113,35 +129,55 @@ and hybrid mode fuses the two ranked lists with reciprocal rank fusion.
 
 ---
 
-## RAG / LLM approach & decisions
+## c. Productionizing on a hyper-scaler
 
-### Chunking — tree-sitter AST
+What this would need to run as a real service:
 
-Paragraph and markdown-heading splitting are meaningless for source code: they cut functions in half and
-strand a body from its signature. Chunks are therefore cut at **real syntactic boundaries** — one function,
-method, or class per chunk, signature and docstring intact.
+**Storage and retrieval.** Replace minsearch with a managed vector database — pgvector on RDS/Cloud SQL if
+Postgres is already in the stack, or Pinecone/Qdrant/Vertex AI Vector Search otherwise — with an ANN index
+so query latency stops scaling linearly with corpus size. Keep the keyword half in OpenSearch and fuse as
+now. Move the repo cache and the embedding cache from local disk to S3/GCS so they're shared across
+instances rather than rebuilt per container.
 
-- **Multi-language.** `tree-sitter-language-pack` covers Python, JS/TS, Go, Rust, Java, Kotlin, Ruby, PHP,
-  C/C++, Swift, Scala, and Bash. Node type names differ per grammar (`function_definition` in Python,
-  `function_declaration` in Go, `function_item` in Rust), so the type map was read off the actual parsers
-  rather than assumed.
-- **Qualified symbols.** A method chunk is named `ClassName.method_name`, so symbol search resolves.
-- **Large containers split.** A class over 120 lines is split into a header chunk plus one chunk per
-  method; smaller classes stay whole, since they read better that way.
-- **Module-level code is kept.** Imports and top-level constants become their own chunk — that's where
-  dependency and configuration questions get answered.
-- **Everything degrades, nothing crashes.** Unsupported grammar (C# isn't bundled), a syntax error, or an
-  oversized node falls back to overlapping line windows. One bad file must never sink a repo's ingestion.
+**Ingestion as a job.** Indexing a large repo takes minutes; it doesn't belong in a request. Push it to a
+queue (SQS/Pub-Sub) with workers (ECS/Cloud Run Jobs), and make it incremental — re-embed only files whose
+content hash changed, driven by a webhook on push, instead of re-processing the repo.
 
-Each chunk is embedded with a context header — `# path | language | Symbol (kind) | L12-34` — so the
-vector actually sees the path and symbol name, which is what people search for.
+**Serving.** Containerize (a Dockerfile is a known gap), split the Streamlit UI from a stateless FastAPI
+backend, and put state in Redis/Postgres rather than `st.session_state` so any instance can serve any
+request. Autoscale on queue depth and request rate.
 
-Markdown keeps heading-based chunking, now with line numbers so its citations link like code does.
-`AUTO` dispatches per file, because a repo contains both.
+**Cost and safety.** The content-addressed embedding cache already exists and would port directly to a
+shared object store. Add query-level caching, per-user rate limits and token budgets. Keys move to Secrets
+Manager. Add input validation on repo URLs and a repository size ceiling.
 
-### Embedding model — pluggable, local by default
+**Observability.** The JSON logs become structured traces (OpenTelemetry → Datadog/Cloud Trace), with
+per-query latency, token spend, tool-call counts, and retrieval hit rates on dashboards. Run the
+LLM-as-judge checklist against a fixed question set in CI and alert on regressions.
 
-Set in `.env`:
+---
+
+## d. RAG / LLM approach & decisions
+
+### LLM selection
+
+**Final choice:** `gpt-4.1-nano`, via pydantic-ai.
+
+| Option | Trade-off |
+|---|---|
+| **gpt-4.1-nano** (chosen) | Cheapest and fastest of the 4.1 family, reliable at tool calling — which is most of what this agent does. Weaker at multi-step reasoning across several files. |
+| gpt-4.1-mini / larger | Noticeably better at synthesising an answer from several files; higher latency and cost per query. |
+| Local model (Ollama etc.) | No API spend and fully offline, but tool-calling reliability drops sharply, and this agent depends on it. |
+
+The same model backs the evaluation agent. **Currently the model name is a constructor default in
+`AgentWrapper` rather than an environment variable** — making it configurable is a small, obvious
+improvement that hasn't been done yet.
+
+> _Your take: why nano was the right default for this exercise, and when you'd move up._
+
+### Embedding model
+
+**Final choice:** pluggable, defaulting to local. Set in `.env`:
 
 ```
 EMBEDDING_PROVIDER=local     # default: free, offline, no API spend
@@ -150,13 +186,17 @@ EMBEDDING_MODEL=...          # optional override for either provider
 EMBEDDING_CACHE=0            # optional: disable the on-disk vector cache
 ```
 
-The default is local `sentence-transformers` (`multi-qa-distilbert-cos-v1`) so the app runs with no
-embedding spend. **Retrieval is noticeably better with `EMBEDDING_PROVIDER=openai`** — that model was
-trained for natural-language QA over prose, not source code, whereas `text-embedding-3-small` handles
-code well and costs roughly $0.02 per million tokens (cents for a typical repo). If you're evaluating
-retrieval quality, switch it on; if you're just running it, local is fine.
+| Option | Trade-off |
+|---|---|
+| **local `multi-qa-distilbert-cos-v1`** (default) | Free, offline, no key needed. But trained for natural-language QA over prose, **not source code** — retrieval quality is the weakest link. |
+| **`text-embedding-3-small`** (supported) | Handles code well, ~$0.02/1M tokens (cents per repo). Needs network and API spend at index time. |
+| Local code-tuned model (e.g. jina-embeddings-v2-base-code) | Free *and* code-aware, but a large download and slow CPU embedding over a whole repo. Not wired up. |
 
-### Vector store — minsearch, and why not a vector database
+Both providers are implemented behind one `Embedder` interface, so switching is a one-line `.env` change.
+**Retrieval is noticeably better with `EMBEDDING_PROVIDER=openai`** — if you're assessing retrieval
+quality, switch it on; if you're just running it, local is fine.
+
+### Vector database — and why there isn't one
 
 `minsearch` keeps TF-IDF and a numpy embedding matrix in memory and scores by brute-force cosine. Before
 reaching for something bigger, it's worth knowing where the time actually goes. Measured on this repo
@@ -181,48 +221,88 @@ At the scale this targets, search is ~11ms — imperceptible next to a multi-sec
 so the useful move was to cache vectors, not to add an engine. For reference, `chromadb` wanted ~40
 transitive packages (aiohttp, bcrypt, kubernetes, …) to speed up an operation that isn't slow.
 
+**Options considered:** Chroma (embedded, but the heaviest dependency tree); LanceDB (embedded,
+memory-mapped, built-in full-text search); sqlite-vec (tiny, but vector-only — minsearch would stay for
+keyword); FAISS (index only, no metadata persistence); pgvector (needs a server, so not "fully local").
+
+**When to revisit:** past roughly 50–100k chunks — several repos indexed together, or a large monorepo —
+search crosses ~200ms and RAM passes 300MB. At that point **LanceDB** is the pick: it would replace *both*
+halves of retrieval (`minsearch.Index` and `VectorSearch`) and do hybrid natively instead of us fusing by
+hand.
+
 ### Persistence — a flat file, not a database
 
 Vectors are cached to `data/index/embeddings/<provider>_<model>/` as `vectors.npy` plus a `keys.json`
 mapping. Re-indexing a cached repo drops from **17.6s to effectively zero**, with identical results.
 
-The decisions inside that, and what they cost:
-
 - **Content-addressed by `sha256(chunk_text)`, not keyed per repo.** The cache invalidates itself: edit one
   file and only its chunks are re-embedded (measured: 111 hits, 1 miss), and identical chunks — licence
-  headers, boilerplate, empty `__init__.py` — are stored once, within and across repos. The alternative,
-  a per-repo snapshot, needs an explicit cache-version constant and still goes stale silently when the
-  chunker changes.
+  headers, boilerplate, empty `__init__.py` — are stored once, within and across repos. A per-repo snapshot
+  would need an explicit cache-version constant and still go stale silently when the chunker changes.
 - **Namespaced per model.** Local vectors are 768-dim and OpenAI's are 1536-dim; mixing them would be
-  silent nonsense rather than a loud failure. Switching provider builds a separate cache, so you pay the
-  embedding cost once per model, not once per switch.
+  silent nonsense rather than a loud failure.
 - **`.npy` with `allow_pickle=False`, not `minsearch.save()`.** Both `Index` and `VectorSearch` offer
   pickle-based persistence, but pickling a fitted scikit-learn vectoriser is version-fragile and executes
-  arbitrary code on load — to save 0.03s of refitting. Persisting plain data and rebuilding the indexes in
-  memory is safer and, at these sizes, free.
+  arbitrary code on load — to save 0.03s of refitting.
 - **Only embeddings are cached; chunks are not.** Chunking takes 0.03s, so caching it would add
   invalidation logic to save nothing measurable.
 - **Queries are not cached**, only corpus chunks — a one-off query would just bloat the store.
-- **Atomic writes** (temp file + `os.replace`), so a crash or a second Streamlit session can't leave a
-  torn cache. A desynchronised or corrupt cache is detected on load and rebuilt rather than trusted.
+- **Atomic writes** (temp file + `os.replace`); a corrupt or desynchronised cache is detected on load and
+  rebuilt rather than trusted.
 
-Costs and limits, honestly: the store grows without bound (~15MB per 5000 chunks) and has **no pruning** —
-it wants an LRU cap or a `--clear-cache` command eventually. Concurrent writers are last-writer-wins, which
-loses additions but never corrupts. Set `EMBEDDING_CACHE=0` in `.env` to disable it.
+Honest cost: the store grows without bound (~15MB per 5000 chunks) with **no pruning**, and concurrent
+writers are last-writer-wins — safe, but a simultaneous session's additions can be lost.
 
-**When to revisit this:** past roughly 50–100k chunks — several repos indexed together, or a large
-monorepo — search crosses ~200ms and RAM passes 300MB. At that point I'd move to **LanceDB**: embedded, no
-server, memory-mapped rather than fully resident, and it has built-in full-text search, so it would replace
-*both* halves of retrieval (`minsearch.Index` and `VectorSearch`) and do hybrid natively instead of us
-fusing by hand. sqlite-vec is vector-only, so minsearch would stay for keyword; faiss stores no metadata,
-so payload persistence becomes your problem.
+### Orchestration framework
 
-### Retrieval — hybrid with reciprocal rank fusion
+**Final choice:** `pydantic-ai` (slim, OpenAI extra only).
+
+| Option | Trade-off |
+|---|---|
+| **pydantic-ai** (chosen) | Tools are plain Python functions — signature and docstring become the schema, so there's no separate tool spec to keep in sync. Structured outputs via pydantic models (used by the evaluation checklist), and a serialisable message history that the JSON logging depends on. Smaller and less abstracted than the alternatives. |
+| LangChain / LangGraph | Largest ecosystem and prebuilt RAG chains, but heavy abstractions over what is ultimately a short tool loop, and more indirection to debug. |
+| LlamaIndex | Strongest built-in RAG primitives (loaders, retrievers, indices) — but this project deliberately owns its chunking and retrieval, which is the interesting part. |
+| Raw OpenAI SDK | Zero abstraction, but the tool loop, schema generation, and message serialisation all become hand-written. |
+
+One dependency note worth recording: the project originally pinned `pydantic-ai`, the meta-package that
+pulls in *every* provider SDK (logfire, mistralai, anthropic, …). Their conflicting OpenTelemetry
+constraints resolved to a version missing a module `pydantic-ai` imports, breaking the install outright.
+Switching to `pydantic-ai-slim[openai]` — only what's used — fixed it.
+
+### Chunking
+
+Paragraph and markdown-heading splitting are meaningless for source code: they cut functions in half and
+strand a body from its signature. Chunks are therefore cut at **real syntactic boundaries** — one function,
+method, or class per chunk, signature and docstring intact.
+
+**Options considered:** tree-sitter AST (chosen); Python's stdlib `ast` (no new dependency, but real
+structure only for `.py`, and most repos aren't Python); universal line windows (simplest, but splits
+functions mid-body).
+
+- **Multi-language.** `tree-sitter-language-pack` covers Python, JS/TS, Go, Rust, Java, Kotlin, Ruby, PHP,
+  C/C++, Swift, Scala, and Bash. Node type names differ per grammar (`function_definition` in Python,
+  `function_declaration` in Go, `function_item` in Rust), so the type map was read off the actual parsers
+  rather than assumed.
+- **Qualified symbols.** A method chunk is named `ClassName.method_name`, so symbol search resolves.
+- **Large containers split.** A class over 120 lines becomes a header chunk plus one chunk per method;
+  smaller classes stay whole, since they read better that way.
+- **Module-level code is kept.** Imports and top-level constants become their own chunk — that's where
+  dependency and configuration questions get answered.
+- **Everything degrades, nothing crashes.** Unsupported grammar (C# isn't bundled), a syntax error, or an
+  oversized node falls back to overlapping line windows. One bad file must never sink a repo's ingestion.
+
+Each chunk is embedded with a context header — `# path | language | Symbol (kind) | L12-34` — so the
+vector actually sees the path and symbol name, which is what people search for.
+
+Markdown keeps heading-based chunking, with line numbers so its citations link like code does.
+`AUTO` dispatches per file, because a repo contains both.
+
+### Retrieval approach
 
 Keyword search nails exact identifiers; vector search handles "how does authentication work". Hybrid runs
-both and fuses by rank (`1/(60+rank)`), so a chunk both retrievers like outranks one that only scored
-well in a single list. The earlier concatenate-and-dedupe approach always put every keyword hit above
-every vector hit regardless of relevance.
+both and fuses by **reciprocal rank fusion** (`1/(60+rank)`), so a chunk both retrievers like outranks one
+that only scored well in a single list. The earlier concatenate-and-dedupe approach always put every
+keyword hit above every vector hit regardless of relevance.
 
 ### Prompt & context management
 
@@ -234,99 +314,151 @@ clickable.
 
 ### Guardrails
 
-Prompt-level: never invent files/functions/APIs, say plainly when something isn't in the repo, label
-inference as inference, and decline off-repo questions. Code-level: both `read_file` and `list_files`
-resolve paths and reject anything outside the cache root, and the same guard covers zip extraction.
+**Prompt-level:** never invent files/functions/APIs; say plainly when something isn't in the repo; label
+inference as inference; decline off-repo questions.
 
-### Quality & observability
+**Code-level:** `read_file` and `list_files` resolve paths and reject anything outside the cache root, and
+the same guard covers zip extraction (zip-slip). Both are covered by tests. Tool output caps bound context
+growth. The allowlist bounds what can enter the index at all.
 
-Every interaction is written to `logs/*.json` with the full message trace, model, tools, and system
-prompt. `AgentLog.evaluate_log_record` runs an **LLM-as-judge** checklist over a logged run — instruction
-following, relevance, clarity, citations, completeness, whether search was actually called, and whether
-every claim is grounded in retrieved code. `main.py --evaluate` runs it on the answer you just got, and
+### Quality controls
+
+`AgentLog.evaluate_log_record` runs an **LLM-as-judge** checklist over a logged run: instruction following,
+relevance, clarity, citations, completeness, whether search was actually called, and whether every claim is
+grounded in retrieved code. `main.py --evaluate` scores the answer you just got, and
 `Prompts.QUESTION_GENERATION_PROMPT` generates test questions from the corpus to evaluate in bulk.
 
-80 tests cover chunking across six languages, the fallback paths, file selection, path-traversal
-rejection, RRF ordering, and the metadata-preservation regressions.
+**94 tests** cover chunking across six languages and its fallback paths, file selection, path-traversal
+rejection, RRF ordering, embedding-cache correctness (reuse, invalidation, model isolation, corruption
+recovery), and the metadata-preservation regressions.
+
+### Observability
+
+Every interaction is written to `logs/*.json` with the full message trace, model, tools, and system prompt —
+enough to replay or evaluate any answer after the fact. The UI reports ingestion stats (files per language,
+chunk count), warns past the ~5000-chunk comfort limit, and shows embedding-cache hits vs misses per index.
+
+> _Gap worth naming: there are no latency or token-spend metrics yet, and nothing aggregates the logs._
 
 ---
 
-## Productionizing on a hyper-scaler
+## e. Key technical decisions and why
 
-What this would need to run as a real service:
+> The decisions and their trade-offs are documented in section (d). This section is for **your** reasoning:
+> what you weighed, what you rejected, and what you'd defend in an interview.
 
-**Storage and retrieval.** Replace minsearch with a managed vector database — pgvector on RDS/Cloud SQL if
-Postgres is already in the stack, or Pinecone/Qdrant/Vertex AI Vector Search otherwise — with an ANN index
-so query latency stops scaling linearly with corpus size. Keep the keyword half in OpenSearch and fuse as
-now. Move the repo cache from local disk to S3/GCS so it's shared across instances.
+| Decision | Made | Your reasoning |
+|---|---|---|
+| Option 2 (Code Documentation Assistant) | | |
+| Streamlit + Python (no separate frontend) | | |
+| tree-sitter AST chunking over simpler splitting | | |
+| Local embeddings by default, OpenAI opt-in | | |
+| minsearch + flat-file cache over a vector DB | | |
+| Three agent tools rather than one-shot retrieval | | |
+| pydantic-ai as orchestrator | | |
+| gpt-4.1-nano as default model | | |
 
-**Ingestion as a job.** Indexing a large repo takes minutes; it doesn't belong in a request. Push it to a
-queue (SQS/Pub-Sub) with workers (ECS/Cloud Run Jobs), and make it incremental — re-embed only files whose
-content hash changed, driven by a webhook on push, instead of re-processing the repo.
+---
 
-**Serving.** Containerize (a Dockerfile is a known gap), split the Streamlit UI from a stateless FastAPI
-backend, and put state in Redis/Postgres rather than `st.session_state` so any instance can serve any
-request. Autoscale on queue depth and request rate.
+## f. Engineering standards followed (and skipped)
 
-**Cost and safety.** Cache embeddings by content hash; cache identical queries. Add per-user rate limits
-and token budgets. Keys move to Secrets Manager. Add input validation on repo URLs and a size ceiling.
+**In place, and verifiable in the repo:**
 
-**Observability.** The JSON logs become structured traces (OpenTelemetry → Datadog/Cloud Trace), with
-per-query latency, token spend, tool-call counts, and retrieval hit rates on dashboards. Run the
-LLM-as-judge checklist against a fixed question set in CI and alert on regressions.
+- 94 tests covering chunking, ingestion, retrieval fusion, the embedding cache, and both security guards
+- Separation of concerns — ingestion, chunking, embedding, retrieval, and agent each own one module
+- Strategy pattern for chunking and retrieval, so alternatives are swappable and comparable
+- Dependency injection (`Embedder`, `SearchStrategy` passed in) — which is what makes the tests fast and
+  network-free
+- Configuration via `.env` with a committed `.env.example`; no secrets in source
+- Security guards on all untrusted input (zip entries, agent-supplied paths), each with tests
+- Failure isolation — one unparseable file degrades to line windows instead of failing ingestion
+- Atomic writes for anything persisted
+- Comments explain *why*, not *what*
+
+**Deliberately skipped, and why:**
+
+- **No Dockerfile** — the clearest gap against the brief.
+- **No CI pipeline** — tests run locally only.
+- **No type checking** (mypy/pyright) and only partial type hints.
+- **No linter/formatter config** (ruff/black) committed.
+- **No structured logging or metrics** — JSON traces only.
+- **No integration test against a live LLM** — the agent loop is tested with pydantic-ai's `TestModel`, so
+  tool wiring is covered but answer quality isn't asserted automatically.
+
+> _Your take: which of these were conscious trade-offs for the time budget versus things you'd never ship
+> without, and what your normal bar looks like._
+
+---
+
+## g. How I used AI tools in my development process
+
+> This section must be in your own words — it's explicitly what the assignment is screening for.
+> Prompts to cover:
+
+- **Which tools**, and for what parts of the work.
+- **What you delegated vs. wrote or specified yourself** — and where you drew that line.
+- **How you verified the output.** (Worth mentioning: several decisions here were settled by *measuring*
+  rather than accepting a plausible suggestion — the vector-database question was decided by benchmarking
+  search at 11ms against embedding at 7.5s, and the tree-sitter node-type map was read off the real parsers
+  after an assumed one would have been wrong for Go and C#.)
+- **Bugs AI introduced or missed**, and how you caught them.
+- **How you keep AI-assisted code consistent with your own style** and maintainable by others.
+- **Your do's and don'ts.**
+
+---
+
+## h. What I'd do differently with more time
+
+> Your own priorities and judgement. The technical backlog below is scope, not judgement — pick from it,
+> reorder it, and say what you'd actually change about the *approach*.
+
+Technical backlog, roughly in the order I'd tackle it:
+
+1. Containerize (Dockerfile + compose) — the clearest gap against the brief.
+2. Make the chat model configurable via `.env` rather than a constructor default.
+3. Prune the embedding cache (LRU cap or a `--clear-cache` command); it currently grows unbounded.
+4. A fixed evaluation question set wired into CI, so retrieval changes are measured rather than eyeballed.
+5. Streaming responses, and surfacing retrieved sources in the UI alongside the answer.
+6. Re-ingest only files whose content hash changed (the embedding cache already makes this cheap;
+   ingestion just doesn't check yet).
+7. A cross-file symbol graph, so "who calls this?" is answered by resolution rather than search.
+
+---
+
+## Screenshots & demo
+
+> Add screenshots to `docs/screenshots/` and link them here. Worth capturing:
+>
+> - The workflow controls with the pipeline complete (Repo ingested → Chunked → Indexed → Agent ready),
+>   including the language breakdown and the embedding-cache hit/miss line
+> - A chat answer showing `path:line` citations with clickable GitHub links
+> - An answer where the agent used `read_file` or `list_files`, not just search
+> - The advanced settings expander (chunking / search / system prompt)
+> - Optionally a short screen recording of one end-to-end run
+
+```
+![Pipeline complete](docs/screenshots/pipeline.png)
+![Cited answer](docs/screenshots/answer.png)
+```
 
 ---
 
 ## Known limitations
 
-- **No incremental re-indexing.** Re-ingesting a repo redoes everything from scratch.
 - **No cross-file symbol graph.** The agent follows references by reading files, not by resolving symbols;
   "who calls this function?" is answered by search, not by a call graph.
 - **Retrieval is chunk-local.** A function split across the 120-line threshold can lose surrounding context.
 - **C# and other unbundled grammars** fall back to line windows, so their chunks have no symbol names.
 - **Only the default branch** of a repo is ingested, and only via public `codeload` zip URLs — no auth,
   no private repos, no incremental git clone.
-- **In-memory state.** Chunks and the fitted indexes live in the Streamlit session, so restarting rebuilds
-  them — cheaply, since the embeddings themselves are cached to disk. Session state also means the app is
-  single-instance; it can't be horizontally scaled as-is.
-- **The embedding cache never shrinks.** No pruning or size cap yet, and concurrent writers are
-  last-writer-wins (safe, but a simultaneous session's additions can be lost).
+- **Ingestion is all-or-nothing.** Re-ingesting re-downloads and re-chunks everything; only the embeddings
+  are reused.
+- **In-memory session state.** Chunks and the fitted indexes live in the Streamlit session, so restarting
+  rebuilds them — cheaply, since embeddings are cached. It also means the app is single-instance and can't
+  be horizontally scaled as-is.
+- **The embedding cache never shrinks**, and concurrent writers are last-writer-wins (safe, but a
+  simultaneous session's additions can be lost).
 - **Binary and generated files are skipped entirely**, so questions about assets or build output can't be
   answered.
-- **gpt-4.1-nano** is the default chat model — cheap and fast, but a stronger model reasons better over
-  multi-file questions.
-
-## What's next
-
-1. Containerize (Dockerfile + compose) — the clearest gap against the brief.
-2. Prune the embedding cache (LRU cap or a `--clear-cache` command); it currently grows unbounded.
-3. A fixed evaluation question set wired into CI, so retrieval changes are measured rather than eyeballed.
-4. Streaming responses, and surfacing retrieved sources in the UI alongside the answer.
-5. Re-ingest only files whose content hash changed, so updating a repo skips untouched files entirely
-   (the embedding cache already makes this cheap; ingestion just doesn't check yet).
-
----
-
-## Notes for the author
-
-> The following sections are required by the assignment and are deliberately left blank — they ask for
-> *your* reasoning and process, which shouldn't be written by an LLM. Delete this note once filled in.
-
-### Key technical decisions I made and why
-
-_(The decisions are documented above; this section is for why you made them — what you traded off, what
-you rejected, what you'd defend in an interview.)_
-
-### Engineering standards I followed (and some I skipped)
-
-_(e.g. what you test and what you deliberately don't, typing, error handling, commit hygiene, what you
-cut for time.)_
-
-### How I used AI tools in my development process
-
-_(Which tools, what you delegated vs. wrote yourself, how you verified output, your do's and don'ts, how
-you keep AI-assisted code maintainable and consistent with your own style.)_
-
-### What I'd do differently with more time
-
-_(Your own priorities — the "What's next" list above is technical scope, not judgement.)_
+- **Local embeddings are the weakest link** in retrieval quality — see the embedding section.
+- **gpt-4.1-nano** is cheap and fast but reasons less well over multi-file questions than a larger model.

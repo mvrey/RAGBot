@@ -36,14 +36,22 @@ if cached_repo_options:
         options=[NO_CACHED_REPO_LABEL] + list(cached_repo_options.keys()),
     )
 
-with st.expander("⚙️ Advanced settings"):
-    chunking_method_name = st.selectbox(
-        "🧩 Chunking Method:",
-        options=[c.name for c in ChunkingStrategy],
-        index=0,
-        help="AUTO picks per file: AST for code, headings for markdown, line windows otherwise.",
-    )
+setting_col1, setting_col2 = st.columns(2)
 
+with setting_col1:
+    chunking_method = st.selectbox(
+        "🧩 Chunking Method:",
+        options=list(ChunkingStrategy),
+        format_func=lambda c: c.label,
+        index=0,
+        help=(
+            "AUTO dispatches per file: AST for code, headings for markdown, line "
+            "windows otherwise. Pick AST to force syntax-aware chunking everywhere."
+        ),
+    )
+    chunking_method_name = chunking_method.name
+
+with setting_col2:
     search_method_name = st.selectbox(
         "🔍 Search Method:",
         options=[s.name for s in SearchStrategyType],
@@ -51,10 +59,12 @@ with st.expander("⚙️ Advanced settings"):
         help="HYBRID fuses keyword and vector results with reciprocal rank fusion.",
     )
 
+with st.expander("📝 System prompt"):
     system_prompt = st.text_area(
-        "📝 System Prompt (for agent):",
+        "System Prompt (for agent):",
         value=Prompts.SYSTEM_PROMPT.strip(),
         height=200,
+        label_visibility="collapsed",
     )
 
 

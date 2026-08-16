@@ -314,7 +314,7 @@ class Repository:
                 return self._markdown_chunks(content, filename)
             return self.code_chunker.chunk_file(content, filename, language)
 
-        if strategy == ChunkingStrategy.CODE:
+        if strategy == ChunkingStrategy.AST:
             return self.code_chunker.chunk_file(content, filename, language)
         if strategy == ChunkingStrategy.MARKDOWN:
             return self._markdown_chunks(content, filename)

@@ -17,6 +17,15 @@ dependencies = [
     "tree-sitter-language-pack>=1.14.0"
 ]
 
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Explicit, because flat-layout auto-discovery trips over the sibling
+# logs/ and docs/ directories at the repo root.
+packages = ["ragbot", "ragbot.src"]
+
 [dependency-groups]
 dev = [
     "jupyter>=1.1.1",
