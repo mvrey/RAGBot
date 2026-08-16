@@ -63,7 +63,10 @@ pytest
 GitHub zip ──► Repository ──► chunkers ──► SearchStrategy ──► AgentWrapper ──► Streamlit / CLI
                    │                            │                  │
               data/repos/                  minsearch          pydantic-ai
-             (on-disk cache)          (TF-IDF + vectors)    (3 tools, gpt-4.1-nano)
+            (source mirror)           (TF-IDF + vectors)    (3 tools, gpt-4.1-nano)
+                   │                            │                  │
+                   │                     data/index/               │
+                   │                  (embedding cache)            │
                    │                                               │
                    └──────────── read_file / list_files ───────────┘
                                                                    │
@@ -71,13 +74,17 @@ GitHub zip ──► Repository ──► chunkers ──► SearchStrategy ─�
                                                           (+ LLM-as-judge eval)
 ```
 
+`data/repos/` is a faithful mirror of the repository; `data/index/` holds derived
+artefacts. They are kept apart deliberately — ingestion and the agent's `list_files`
+both walk the repo tree, and would otherwise pick up cache files as source code.
+
 | Module | Responsibility |
 |---|---|
 | `src/Repository.py` | Downloads the repo zip, filters files, mirrors them to an on-disk cache, dispatches chunking |
 | `src/CodeChunker.py` | tree-sitter AST chunking; falls back to line windows |
 | `src/TextChunker.py` | Markdown/prose chunking (headings, paragraphs, sliding window, LLM) |
 | `src/ChunkingStrategy.py` | Strategy enum; `AUTO` dispatches per file type |
-| `src/Embeddings.py` | Pluggable embedding providers (local / OpenAI) |
+| `src/Embeddings.py` | Pluggable embedding providers (local / OpenAI) and the on-disk vector cache |
 | `src/TextSearcher.py` | Keyword, vector, and hybrid (RRF) retrieval over minsearch |
 | `src/SearchStrategy.py` | Retrieval-mode dispatch |
 | `src/AgentWrapper.py` | pydantic-ai agent and its three tools |
@@ -140,6 +147,7 @@ Set in `.env`:
 EMBEDDING_PROVIDER=local     # default: free, offline, no API spend
 EMBEDDING_PROVIDER=openai    # text-embedding-3-small
 EMBEDDING_MODEL=...          # optional override for either provider
+EMBEDDING_CACHE=0            # optional: disable the on-disk vector cache
 ```
 
 The default is local `sentence-transformers` (`multi-qa-distilbert-cos-v1`) so the app runs with no
@@ -148,11 +156,66 @@ trained for natural-language QA over prose, not source code, whereas `text-embed
 code well and costs roughly $0.02 per million tokens (cents for a typical repo). If you're evaluating
 retrieval quality, switch it on; if you're just running it, local is fine.
 
-### Vector store — minsearch
+### Vector store — minsearch, and why not a vector database
 
-`minsearch` keeps TF-IDF and a numpy embedding matrix in memory and scores by brute-force cosine. That's
-genuinely fine up to a few thousand chunks and keeps the stack dependency-light. The UI warns past ~5000
-chunks, where the linear scan starts to drag. See *Productionizing* for what replaces it.
+`minsearch` keeps TF-IDF and a numpy embedding matrix in memory and scores by brute-force cosine. Before
+reaching for something bigger, it's worth knowing where the time actually goes. Measured on this repo
+(112 chunks, 768-dim, local embeddings):
+
+| step | time |
+|---|---|
+| chunking (tree-sitter) | 0.03s |
+| fit TF-IDF index | 0.03s |
+| **embed the corpus** | **7.5s** (~67ms/chunk) |
+
+Extrapolating the search side to larger corpora:
+
+| corpus | RAM | brute-force search | load cache from disk | embedding cost avoided |
+|---|---|---|---|---|
+| 5,000 chunks | 15 MB | 11.5 ms | 14 ms | ~5.6 min |
+| 20,000 chunks | 61 MB | 46 ms | 32 ms | ~22 min |
+| 100,000 chunks | 307 MB | 223 ms | 121 ms | ~1.9 hr |
+
+At the scale this targets, search is ~11ms — imperceptible next to a multi-second LLM call. Embedding is
+~99% of the repeatable cost. **A vector database would optimise the 11ms and leave the minutes untouched**,
+so the useful move was to cache vectors, not to add an engine. For reference, `chromadb` wanted ~40
+transitive packages (aiohttp, bcrypt, kubernetes, …) to speed up an operation that isn't slow.
+
+### Persistence — a flat file, not a database
+
+Vectors are cached to `data/index/embeddings/<provider>_<model>/` as `vectors.npy` plus a `keys.json`
+mapping. Re-indexing a cached repo drops from **17.6s to effectively zero**, with identical results.
+
+The decisions inside that, and what they cost:
+
+- **Content-addressed by `sha256(chunk_text)`, not keyed per repo.** The cache invalidates itself: edit one
+  file and only its chunks are re-embedded (measured: 111 hits, 1 miss), and identical chunks — licence
+  headers, boilerplate, empty `__init__.py` — are stored once, within and across repos. The alternative,
+  a per-repo snapshot, needs an explicit cache-version constant and still goes stale silently when the
+  chunker changes.
+- **Namespaced per model.** Local vectors are 768-dim and OpenAI's are 1536-dim; mixing them would be
+  silent nonsense rather than a loud failure. Switching provider builds a separate cache, so you pay the
+  embedding cost once per model, not once per switch.
+- **`.npy` with `allow_pickle=False`, not `minsearch.save()`.** Both `Index` and `VectorSearch` offer
+  pickle-based persistence, but pickling a fitted scikit-learn vectoriser is version-fragile and executes
+  arbitrary code on load — to save 0.03s of refitting. Persisting plain data and rebuilding the indexes in
+  memory is safer and, at these sizes, free.
+- **Only embeddings are cached; chunks are not.** Chunking takes 0.03s, so caching it would add
+  invalidation logic to save nothing measurable.
+- **Queries are not cached**, only corpus chunks — a one-off query would just bloat the store.
+- **Atomic writes** (temp file + `os.replace`), so a crash or a second Streamlit session can't leave a
+  torn cache. A desynchronised or corrupt cache is detected on load and rebuilt rather than trusted.
+
+Costs and limits, honestly: the store grows without bound (~15MB per 5000 chunks) and has **no pruning** —
+it wants an LRU cap or a `--clear-cache` command eventually. Concurrent writers are last-writer-wins, which
+loses additions but never corrupts. Set `EMBEDDING_CACHE=0` in `.env` to disable it.
+
+**When to revisit this:** past roughly 50–100k chunks — several repos indexed together, or a large
+monorepo — search crosses ~200ms and RAM passes 300MB. At that point I'd move to **LanceDB**: embedded, no
+server, memory-mapped rather than fully resident, and it has built-in full-text search, so it would replace
+*both* halves of retrieval (`minsearch.Index` and `VectorSearch`) and do hybrid natively instead of us
+fusing by hand. sqlite-vec is vector-only, so minsearch would stay for keyword; faiss stores no metadata,
+so payload persistence becomes your problem.
 
 ### Retrieval — hybrid with reciprocal rank fusion
 
@@ -223,8 +286,11 @@ LLM-as-judge checklist against a fixed question set in CI and alert on regressio
 - **C# and other unbundled grammars** fall back to line windows, so their chunks have no symbol names.
 - **Only the default branch** of a repo is ingested, and only via public `codeload` zip URLs — no auth,
   no private repos, no incremental git clone.
-- **In-memory state.** Chunks and indexes live in the Streamlit session; restarting re-indexes. Only the
-  raw downloaded files persist.
+- **In-memory state.** Chunks and the fitted indexes live in the Streamlit session, so restarting rebuilds
+  them — cheaply, since the embeddings themselves are cached to disk. Session state also means the app is
+  single-instance; it can't be horizontally scaled as-is.
+- **The embedding cache never shrinks.** No pruning or size cap yet, and concurrent writers are
+  last-writer-wins (safe, but a simultaneous session's additions can be lost).
 - **Binary and generated files are skipped entirely**, so questions about assets or build output can't be
   answered.
 - **gpt-4.1-nano** is the default chat model — cheap and fast, but a stronger model reasons better over
@@ -233,10 +299,11 @@ LLM-as-judge checklist against a fixed question set in CI and alert on regressio
 ## What's next
 
 1. Containerize (Dockerfile + compose) — the clearest gap against the brief.
-2. Persist chunks and indexes to disk so "Load Cached Repo" can skip chunking and embedding too.
-3. Incremental re-indexing by content hash.
-4. A fixed evaluation question set wired into CI, so retrieval changes are measured rather than eyeballed.
-5. Streaming responses, and surfacing retrieved sources in the UI alongside the answer.
+2. Prune the embedding cache (LRU cap or a `--clear-cache` command); it currently grows unbounded.
+3. A fixed evaluation question set wired into CI, so retrieval changes are measured rather than eyeballed.
+4. Streaming responses, and surfacing retrieved sources in the UI alongside the answer.
+5. Re-ingest only files whose content hash changed, so updating a repo skips untouched files entirely
+   (the embedding cache already makes this cheap; ingestion just doesn't check yet).
 
 ---
 

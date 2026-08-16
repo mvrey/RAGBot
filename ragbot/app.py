@@ -146,9 +146,22 @@ def index_repo():
     embedder = get_embedder()
     st.write(f"📇 Indexing with {embedder.name}...")
     st.session_state.search_method = SearchStrategyType[search_method_name]
-    st.session_state.search_strategy = SearchStrategy(embedder=embedder)
+    search_strategy = SearchStrategy(embedder=embedder)
+
+    # Build the vector index now rather than on the first query, so the embedding
+    # cost (and any cache saving) is visible here instead of stalling the chat.
+    if st.session_state.search_method in (SearchStrategyType.VECTOR, SearchStrategyType.HYBRID):
+        with st.spinner("Embedding chunks..."):
+            search_strategy.searcher._get_vector_index(st.session_state.chunks)
+
+    st.session_state.search_strategy = search_strategy
     st.session_state.repo_indexed = True
     st.success(f"✅ Indexed for {st.session_state.search_method.name} search")
+
+    if getattr(embedder, 'last_hits', 0) or getattr(embedder, 'last_misses', 0):
+        st.caption(
+            f"Embedding cache — {embedder.last_hits} reused, {embedder.last_misses} newly embedded"
+        )
 
 
 # --- Step 4: Initialize Agent ---
