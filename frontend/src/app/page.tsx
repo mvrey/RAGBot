@@ -124,12 +124,12 @@ export default function HomePage() {
       <Dialog open={!!repoToDelete} onOpenChange={(open) => !open && setRepoToDelete(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete this repository?</DialogTitle>
+            <DialogTitle>Delete this project?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             This permanently deletes the cached files and index for{' '}
-            <span className="font-mono text-foreground">{repoToDelete?.repo_key}</span>. This can&apos;t be
-            undone — you&apos;ll need to re-ingest it to chat with it again.
+            <span className="font-mono text-foreground">{repoToDelete?.display_name ?? repoToDelete?.repo_key}</span>.
+            This can&apos;t be undone — you&apos;ll need to re-ingest it to chat with it again.
           </p>
           {deleteRepo.isError && (
             <p className="text-sm text-destructive">Failed to delete. Try again.</p>

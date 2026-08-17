@@ -62,7 +62,7 @@ export default function RepoWorkspacePage({ params }: { params: Promise<{ key: s
               variant="ghost"
               size="icon-sm"
               className="shrink-0 text-muted-foreground hover:text-foreground"
-              aria-label="Rename repository"
+              aria-label="Rename project"
               onClick={() => repo && setRenaming({ repo_key: repo.repo_key, display_name: repo.display_name })}
             >
               <Pencil className="size-3.5" />

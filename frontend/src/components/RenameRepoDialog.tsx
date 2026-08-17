@@ -52,7 +52,7 @@ function RenameForm({ repo, onClose, onRenamed }: { repo: RenameTarget } & Omit<
   return (
     <form onSubmit={handleSubmit}>
       <DialogHeader>
-        <DialogTitle>Rename repository</DialogTitle>
+        <DialogTitle>Rename project</DialogTitle>
       </DialogHeader>
       <div className="mt-4 space-y-2">
         <label htmlFor="rename-input" className="text-sm font-medium">
