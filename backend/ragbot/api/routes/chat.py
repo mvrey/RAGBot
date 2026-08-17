@@ -4,6 +4,7 @@ import anyio
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
+from ragbot.core.AgentLog import AgentLog
 from ragbot.api.schemas import (
     AskRequest,
     ConversationCreate,
@@ -85,5 +86,13 @@ async def ask(conversation_id: str, payload: AskRequest, state: AppState = Depen
             citations=citations,
             history=new_history,
         )
+
+        if history_sink:
+            # Same trace the CLI has always written, now also from the web app -
+            # per-interaction JSON with the full message trace, model, and
+            # tools, so a billing surprise or a bad answer can be replayed.
+            await anyio.to_thread.run_sync(
+                AgentLog().log_interaction_to_file, built.agent_wrapper.agent, new_history, 'api',
+            )
 
     return EventSourceResponse(generate())

@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { streamAsk } from '@/lib/api';
-import type { Citation, MessageOut, ToolCallEventData, ToolResultEventData } from '@/lib/types';
+import type { Citation, DoneEventData, MessageOut, ToolCallEventData, ToolResultEventData } from '@/lib/types';
 
 export interface ToolStep {
   id: string;
@@ -11,8 +11,16 @@ export interface ToolStep {
   result?: ToolResultEventData;
 }
 
+/** A chat message, optionally carrying the usage of the turn that produced it -
+ * only ever set for assistant messages from *this* session (the done event is
+ * live-only, not persisted server-side), which is enough to answer "why did
+ * this message cost what it cost" right where the answer appears. */
+export interface ChatMessage extends MessageOut {
+  usage?: DoneEventData['usage'];
+}
+
 interface UseChatState {
-  messages: MessageOut[];
+  messages: ChatMessage[];
   streamingAnswer: string;
   streamingCitations: Citation[];
   toolSteps: ToolStep[];
@@ -81,7 +89,7 @@ export function useChat(conversationId: string | null, initialMessages: MessageO
             setState((s) => ({
               messages: [
                 ...s.messages,
-                { role: 'assistant', content: answer, citations: [...citations] },
+                { role: 'assistant', content: answer, citations: [...citations], usage: event.data.usage },
               ],
               streamingAnswer: '',
               streamingCitations: [],

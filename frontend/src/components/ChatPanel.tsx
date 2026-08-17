@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Send, Trash2, Loader2 } from 'lucide-react';
+import { Send, Trash2, Loader2, Gauge } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useChat } from '@/hooks/useChat';
 import type { CitationMatch } from '@/lib/citations';
+import type { DoneEventData } from '@/lib/types';
 import { AnswerText } from '@/components/AnswerText';
 import { ToolSteps } from '@/components/ToolSteps';
 import { Button } from '@/components/ui/button';
@@ -97,7 +98,10 @@ export function ChatPanel({ repoKey, onOpenCitation, activeCitation }: ChatPanel
                 )}
               >
                 {message.role === 'assistant' ? (
-                  <AnswerText text={message.content} onOpenCitation={onOpenCitation} activeCitation={activeCitation} />
+                  <>
+                    <AnswerText text={message.content} onOpenCitation={onOpenCitation} activeCitation={activeCitation} />
+                    {message.usage && <UsageCaption usage={message.usage} />}
+                  </>
                 ) : (
                   <p className="whitespace-pre-wrap break-words">{message.content}</p>
                 )}
@@ -135,5 +139,19 @@ export function ChatPanel({ repoKey, onOpenCitation, activeCitation }: ChatPanel
         </Button>
       </form>
     </div>
+  );
+}
+
+/** Per-turn cost visibility: one "message" in the UI is often several Gemini
+ * calls under the hood (the agent re-searches, reads files, etc., each one
+ * resending the growing conversation as input tokens) - this is what actually
+ * drove the bill, and it's otherwise invisible. */
+function UsageCaption({ usage }: { usage: DoneEventData['usage'] }) {
+  return (
+    <p className="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground/70">
+      <Gauge className="size-3" />
+      {usage.requests} LLM {usage.requests === 1 ? 'call' : 'calls'} ·{' '}
+      {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out tokens
+    </p>
   );
 }

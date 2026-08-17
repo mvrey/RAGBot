@@ -1,4 +1,5 @@
 import io
+import json
 import zipfile
 
 import httpx
@@ -10,6 +11,7 @@ import ragbot.api.jobs as jobs_module
 import ragbot.core.Repository as repository_module
 from ragbot.api.main import app
 from ragbot.api.state import AppState
+from ragbot.core.settings import LOG_DIR
 
 REPO_URL = 'https://codeload.github.com/testowner/testrepo/zip/refs/heads/main'
 REPO_KEY = 'testowner_testrepo_main'
@@ -276,6 +278,31 @@ class TestConversations:
         assert detail['messages'][0]['role'] == 'user'
         assert detail['messages'][1]['role'] == 'assistant'
         assert 'hybrid_search' in detail['messages'][1]['content']
+
+    async def test_ask_writes_an_interaction_log(self, client):
+        await _ingest(client)
+        conv_id = (await client.post('/api/conversations', json={'repo_key': REPO_KEY})).json()['conversation_id']
+
+        async def stream_function(messages, agent_info):
+            yield "logged answer."
+
+        built = app.state.ragbot.get_or_build_index(REPO_KEY)
+        built.agent_wrapper.agent.model = FunctionModel(stream_function=stream_function)
+
+        before = set(LOG_DIR.glob('*.json'))
+
+        async with client.stream(
+            'POST', f'/api/conversations/{conv_id}/messages', json={'content': 'log me please'},
+        ) as stream:
+            async for _ in stream.aiter_lines():
+                pass
+
+        new_files = set(LOG_DIR.glob('*.json')) - before
+        assert len(new_files) == 1
+
+        entry = json.loads(new_files.pop().read_text(encoding='utf-8'))
+        assert entry['source'] == 'api'
+        assert entry['messages'][0]['parts'][0]['content'] == 'log me please'
 
     async def test_clear_conversation_resets_messages(self, client):
         await _ingest(client)
