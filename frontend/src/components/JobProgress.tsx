@@ -54,33 +54,33 @@ export function JobProgress({ jobId, onSucceeded, onFailed }: JobProgressProps) 
   const failed = job?.status === 'failed';
 
   return (
-    <div className="space-y-3">
-      <ol className="flex items-center gap-1">
+    <div className="space-y-6">
+      <ol className="flex items-center gap-2">
         {PHASES.map((phase, i) => {
           const done = currentIndex > i || (currentIndex === i && job?.status === 'succeeded');
           const active = currentIndex === i && job?.status === 'running';
           return (
-            <li key={phase.key} className="flex flex-1 items-center gap-1">
-              <div className="flex flex-col items-center gap-1 text-xs">
+            <li key={phase.key} className="flex flex-1 items-center gap-2">
+              <div className="flex flex-col items-center gap-2 text-sm">
                 {failed && currentIndex === i ? (
-                  <XCircle className="size-4 text-destructive" />
+                  <XCircle className="size-8 text-destructive" />
                 ) : done ? (
-                  <CheckCircle2 className="size-4 text-emerald-500" />
+                  <CheckCircle2 className="size-8 text-emerald-500" />
                 ) : active ? (
-                  <Loader2 className="size-4 animate-spin text-primary" />
+                  <Loader2 className="size-8 animate-spin text-primary" />
                 ) : (
-                  <CircleDashed className="size-4 text-muted-foreground/50" />
+                  <CircleDashed className="size-8 text-muted-foreground/50" />
                 )}
                 <span className={cn('whitespace-nowrap', (done || active) && 'font-medium')}>{phase.label}</span>
               </div>
               {i < PHASES.length - 1 && (
-                <div className={cn('h-px flex-1', done ? 'bg-emerald-500' : 'bg-border')} />
+                <div className={cn('h-0.5 flex-1', done ? 'bg-emerald-500' : 'bg-border')} />
               )}
             </li>
           );
         })}
       </ol>
-      <p className={cn('text-sm', failed ? 'text-destructive' : 'text-muted-foreground')}>
+      <p className={cn('text-base', failed ? 'text-destructive' : 'text-muted-foreground')}>
         {job?.error ?? job?.message ?? 'Starting…'}
       </p>
     </div>

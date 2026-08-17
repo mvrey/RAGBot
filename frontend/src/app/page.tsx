@@ -1,25 +1,36 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FolderGit2, Plus } from 'lucide-react';
+import { FolderGit2, Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import type { RepoSummary } from '@/lib/types';
 import { IngestForm } from '@/components/IngestForm';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export default function HomePage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [repoToDelete, setRepoToDelete] = useState<RepoSummary | null>(null);
   const { data: repos, isLoading } = useQuery({ queryKey: ['repos'], queryFn: api.listRepos });
 
   const openRepo = (repoKey: string) => {
     setDialogOpen(false);
     router.push(`/repo/${repoKey}`);
   };
+
+  const deleteRepo = useMutation({
+    mutationFn: (repoKey: string) => api.deleteRepo(repoKey),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repos'] });
+      setRepoToDelete(null);
+    },
+  });
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-12">
@@ -33,9 +44,9 @@ export default function HomePage() {
             <Plus className="size-4" />
             Ingest a repo
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="sm:max-w-2xl p-8 gap-6">
             <DialogHeader>
-              <DialogTitle>Ingest a GitHub repository</DialogTitle>
+              <DialogTitle className="text-2xl">Ingest a GitHub repository</DialogTitle>
             </DialogHeader>
             <IngestForm onIngested={openRepo} />
           </DialogContent>
@@ -66,6 +77,20 @@ export default function HomePage() {
                 <FolderGit2 className="size-4 text-muted-foreground" />
                 {repo.repo_key}
               </CardTitle>
+              <CardAction>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground hover:text-destructive"
+                  aria-label={`Delete ${repo.repo_key}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRepoToDelete(repo);
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </CardAction>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
               <span>{repo.file_count} files</span>
@@ -76,6 +101,34 @@ export default function HomePage() {
           </Card>
         ))}
       </div>
+
+      <Dialog open={!!repoToDelete} onOpenChange={(open) => !open && setRepoToDelete(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete this repository?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This permanently deletes the cached files and index for{' '}
+            <span className="font-mono text-foreground">{repoToDelete?.repo_key}</span>. This can&apos;t be
+            undone — you&apos;ll need to re-ingest it to chat with it again.
+          </p>
+          {deleteRepo.isError && (
+            <p className="text-sm text-destructive">Failed to delete. Try again.</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRepoToDelete(null)} disabled={deleteRepo.isPending}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => repoToDelete && deleteRepo.mutate(repoToDelete.repo_key)}
+              disabled={deleteRepo.isPending}
+            >
+              {deleteRepo.isPending ? 'Deleting…' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

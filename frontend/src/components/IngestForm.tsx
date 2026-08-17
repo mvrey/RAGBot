@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { isValidCodeloadUrl, toCodeloadUrl } from '@/lib/validation';
+import { looksLikeRepoUrl, resolveCodeloadUrl } from '@/lib/validation';
 import { JobProgress } from '@/components/JobProgress';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,19 +24,25 @@ export function IngestForm({ onIngested }: IngestFormProps) {
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: api.config });
 
   const ingest = useMutation({
-    mutationFn: (url: string) => api.ingestRepo({ repo_url: url, chunking_strategy: chunkingStrategy, search_method: searchMethod }),
+    mutationFn: async (url: string) => {
+      // Resolves the repo's actual default branch via the GitHub API when the
+      // URL doesn't name one - guessing "main" 404s against any repo that
+      // still defaults to "master".
+      const resolved = await resolveCodeloadUrl(url);
+      if (!resolved) throw new Error('Enter a github.com repository URL.');
+      return api.ingestRepo({ repo_url: resolved, chunking_strategy: chunkingStrategy, search_method: searchMethod });
+    },
     onSuccess: (data) => setJobId(data.job_id),
   });
 
-  const normalizedUrl = isValidCodeloadUrl(repoUrl) ? repoUrl.trim() : toCodeloadUrl(repoUrl) ?? '';
-  const isValid = isValidCodeloadUrl(normalizedUrl);
+  const isValid = looksLikeRepoUrl(repoUrl);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setTouched(true);
     setFailedMessage(null);
     if (!isValid) return;
-    ingest.mutate(normalizedUrl);
+    ingest.mutate(repoUrl);
   };
 
   if (jobId) {
@@ -53,9 +59,9 @@ export function IngestForm({ onIngested }: IngestFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-1.5">
-        <label htmlFor="repo-url" className="text-sm font-medium">
+    <form onSubmit={handleSubmit} className="space-y-8">
+      <div className="space-y-2.5">
+        <label htmlFor="repo-url" className="text-base font-medium">
           GitHub repository URL
         </label>
         <Input
@@ -64,39 +70,40 @@ export function IngestForm({ onIngested }: IngestFormProps) {
           value={repoUrl}
           onChange={(e) => setRepoUrl(e.target.value)}
           onBlur={() => setTouched(true)}
+          className="h-14 px-4 text-lg"
         />
         {touched && repoUrl && !isValid && (
-          <p className="text-xs text-destructive">
+          <p className="text-sm text-destructive">
             Enter a github.com repository URL, e.g. https://github.com/owner/repo
           </p>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium">Chunking method</label>
+      <div className="grid grid-cols-2 gap-6">
+        <div className="space-y-2.5">
+          <label className="text-base font-medium">Chunking method</label>
           <Select value={chunkingStrategy} onValueChange={(value) => value && setChunkingStrategy(value)}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
+            <SelectTrigger className="w-full data-[size=default]:h-14 px-4 text-sm">
+              <SelectValue className="min-w-0 truncate" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="text-sm">
               {(config?.chunking_strategies ?? []).map((option) => (
-                <SelectItem key={option.name} value={option.name}>
+                <SelectItem key={option.name} value={option.name} className="py-2 text-sm">
                   {option.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium">Search method</label>
+        <div className="space-y-2.5">
+          <label className="text-base font-medium">Search method</label>
           <Select value={searchMethod} onValueChange={(value) => value && setSearchMethod(value)}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
+            <SelectTrigger className="w-full data-[size=default]:h-14 px-4 text-sm">
+              <SelectValue className="min-w-0 truncate" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="text-sm">
               {(config?.search_methods ?? []).map((option) => (
-                <SelectItem key={option.name} value={option.name}>
+                <SelectItem key={option.name} value={option.name} className="py-2 text-sm">
                   {option.label}
                 </SelectItem>
               ))}
@@ -106,12 +113,12 @@ export function IngestForm({ onIngested }: IngestFormProps) {
       </div>
 
       {(ingest.isError || failedMessage) && (
-        <p className="text-sm text-destructive">
+        <p className="text-base text-destructive">
           {failedMessage ?? (ingest.error instanceof Error ? ingest.error.message : 'Ingestion failed.')}
         </p>
       )}
 
-      <Button type="submit" className="w-full" disabled={!repoUrl || ingest.isPending}>
+      <Button type="submit" size="lg" className="w-full h-14 text-lg" disabled={!repoUrl || ingest.isPending}>
         {ingest.isPending ? 'Starting…' : 'Ingest repository'}
       </Button>
     </form>
