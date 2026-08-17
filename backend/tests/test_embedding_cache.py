@@ -14,12 +14,16 @@ class CountingEmbedder(Embedder):
     def __init__(self, dim=8):
         self.dim = dim
         self.embedded = []
+        self.progress_calls = []
 
-    def encode(self, texts):
+    def encode(self, texts, on_progress=None):
         if isinstance(texts, str):
             self.embedded.append(texts)
             return self._vector(texts)
         self.embedded.extend(texts)
+        if on_progress:
+            self.progress_calls.append((len(texts), len(texts)))
+            on_progress(len(texts), len(texts))
         return np.array([self._vector(t) for t in texts])
 
     def _vector(self, text):
@@ -167,3 +171,50 @@ class TestIsolationAndSafety:
         cached.encode(CHUNKS)
 
         assert not list(cached.cache_dir.glob('*.tmp'))
+
+
+class TestEviction:
+
+    def test_evict_removes_only_the_given_texts(self, cached, inner):
+        cached.encode(CHUNKS)
+
+        removed = cached.evict_texts(["def a(): pass"])
+
+        assert removed == 1
+        assert cached.evict_texts(["def a(): pass"]) == 0, "already gone, nothing left to remove"
+        # The untouched chunks must still be cache hits.
+        inner.embedded.clear()
+        cached.encode(["def b(): pass", "def c(): pass"])
+        assert inner.embedded == []
+
+    def test_evicted_text_is_re_embedded_on_next_encode(self, cached, inner):
+        cached.encode(CHUNKS)
+        cached.evict_texts(["def a(): pass"])
+        inner.embedded.clear()
+
+        cached.encode(CHUNKS)
+
+        assert inner.embedded == ["def a(): pass"]
+
+    def test_evict_persists_across_instances(self, inner, tmp_path):
+        CachingEmbedder(inner, cache_dir=tmp_path).encode(CHUNKS)
+        CachingEmbedder(inner, cache_dir=tmp_path).evict_texts(["def a(): pass"])
+        inner.embedded.clear()
+
+        fresh = CachingEmbedder(inner, cache_dir=tmp_path)
+        fresh.encode(CHUNKS)
+
+        assert inner.embedded == ["def a(): pass"]
+
+    def test_evict_on_empty_cache_is_a_no_op(self, cached):
+        assert cached.evict_texts(["nothing cached yet"]) == 0
+
+    def test_evict_with_no_matches_leaves_cache_untouched(self, cached, inner):
+        cached.encode(CHUNKS)
+
+        removed = cached.evict_texts(["not a cached chunk"])
+
+        assert removed == 0
+        inner.embedded.clear()
+        cached.encode(CHUNKS)
+        assert inner.embedded == []

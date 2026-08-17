@@ -8,9 +8,11 @@ import pytest
 from pydantic_ai.models.function import FunctionModel
 
 import ragbot.api.jobs as jobs_module
+import ragbot.api.routes.repos as repos_module
 import ragbot.core.Repository as repository_module
 from ragbot.api.main import app
 from ragbot.api.state import AppState
+from ragbot.core.Embeddings import CachingEmbedder
 from ragbot.core.settings import LOG_DIR
 
 REPO_URL = 'https://codeload.github.com/testowner/testrepo/zip/refs/heads/main'
@@ -37,10 +39,13 @@ class FakeResponse:
 class FakeEmbedder:
     name = 'fake:test-embedder'
 
-    def encode(self, texts):
+    def encode(self, texts, on_progress=None):
         if isinstance(texts, str):
             return self._vector(texts)
-        return np.array([self._vector(t) for t in texts])
+        vectors = [self._vector(t) for t in texts]
+        if on_progress:
+            on_progress(len(vectors), len(vectors))
+        return np.array(vectors)
 
     @staticmethod
     def _vector(text):
@@ -124,6 +129,36 @@ class TestIngestionLifecycle:
     async def test_unknown_job_is_404(self, client):
         resp = await client.get('/api/jobs/does-not-exist')
         assert resp.status_code == 404
+
+    async def test_ingest_job_reports_progress_during_chunking_and_embedding(self, client, monkeypatch):
+        from ragbot.api.state import JobRegistry
+
+        progress_snapshots = []
+        original_update = JobRegistry.update
+
+        def recording_update(self, job_id, **fields):
+            original_update(self, job_id, **fields)
+            if fields.get('progress') is not None:
+                progress_snapshots.append(fields['progress'])
+
+        monkeypatch.setattr(JobRegistry, 'update', recording_update)
+
+        # HYBRID exercises both the chunking on_progress (per-file) and the
+        # embedding on_progress (per-batch) callbacks; TEXT would skip embedding.
+        await _ingest(client, search_method='HYBRID')
+
+        assert progress_snapshots, 'expected at least one progress update during ingestion'
+        assert all(p['current'] <= p['total'] for p in progress_snapshots)
+        assert any(p['current'] == p['total'] for p in progress_snapshots), \
+            'expected chunking and/or embedding to report reaching completion'
+
+    async def test_ingest_job_progress_is_cleared_once_ready(self, client):
+        job_id, _ = await _ingest(client)
+
+        job = (await client.get(f'/api/jobs/{job_id}')).json()
+
+        assert job['status'] == 'succeeded'
+        assert job['progress'] is None
 
     async def test_invalid_chunking_strategy_is_422(self, client):
         resp = await client.post('/api/repos', json={'repo_url': REPO_URL, 'chunking_strategy': 'NOPE', 'search_method': 'TEXT'})
@@ -428,6 +463,27 @@ class TestRepoDeletion:
     async def test_deleting_unknown_repo_is_404(self, client):
         resp = await client.delete('/api/repos/does-not-exist')
         assert resp.status_code == 404
+
+    async def test_delete_evicts_embedding_cache(self, client, monkeypatch, tmp_path):
+        # Both the ingest pipeline (jobs.py) and the delete route (repos.py)
+        # call their own get_embedder() - share one CachingEmbedder between
+        # them so this test can observe the same on-disk cache both sides see.
+        shared_cache = CachingEmbedder(FakeEmbedder(), cache_dir=tmp_path)
+        monkeypatch.setattr(jobs_module, 'get_embedder', lambda: shared_cache)
+        monkeypatch.setattr(repos_module, 'get_embedder', lambda: shared_cache)
+
+        await _ingest(client, search_method='HYBRID')
+
+        populated = CachingEmbedder(FakeEmbedder(), cache_dir=tmp_path)
+        populated._load()
+        assert len(populated._keys) > 0, 'ingest should have populated the embedding cache'
+
+        resp = await client.delete(f'/api/repos/{REPO_KEY}')
+        assert resp.status_code == 204
+
+        after_delete = CachingEmbedder(FakeEmbedder(), cache_dir=tmp_path)
+        after_delete._load()
+        assert after_delete._keys == [], "delete should evict this repo's cached vectors"
 
 
 class TestConversations:

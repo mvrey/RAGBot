@@ -164,6 +164,18 @@ class TestChunking:
         assert repo.skipped_docs == 1
         assert repo.processed_docs == 1
 
+    def test_on_progress_reports_one_call_per_file_including_skipped(self, tmp_path):
+        repo = self._repo(tmp_path, {
+            "empty.py": "",
+            "a.py": "def f():\n    return 1\n",
+            "b.py": "def g():\n    return 2\n",
+        })
+        calls = []
+
+        repo.chunk(ChunkingStrategy.AUTO, on_progress=lambda done, total: calls.append((done, total)))
+
+        assert calls == [(1, 3), (2, 3), (3, 3)]
+
 
 class TestDiskCache:
 

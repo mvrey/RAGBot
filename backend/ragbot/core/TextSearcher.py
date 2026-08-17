@@ -34,10 +34,10 @@ class TextSearcher:
         return self._text_index
 
 
-    def _get_vector_index(self, chunks):
+    def _get_vector_index(self, chunks, on_progress=None):
         if self._vector_index is None:
             texts = [c.get('chunk', '') for c in chunks]
-            embeddings = self._embedder.encode(texts)
+            embeddings = self._embedder.encode(texts, on_progress=on_progress)
 
             vector_index = VectorSearch()
             vector_index.fit(np.array(embeddings), chunks)

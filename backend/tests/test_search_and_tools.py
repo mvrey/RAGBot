@@ -14,11 +14,14 @@ class FakeEmbedder:
     def __init__(self):
         self.calls = 0
 
-    def encode(self, texts):
+    def encode(self, texts, on_progress=None):
         if isinstance(texts, str):
             return self._vector(texts)
         self.calls += 1
-        return np.array([self._vector(t) for t in texts])
+        vectors = [self._vector(t) for t in texts]
+        if on_progress:
+            on_progress(len(vectors), len(vectors))
+        return np.array(vectors)
 
     @staticmethod
     def _vector(text):

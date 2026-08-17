@@ -69,6 +69,7 @@ class JobRegistry:
             'result': None,
             'created_at': time.time(),
             'version': 0,
+            'progress': None,
         }
         return job_id
 

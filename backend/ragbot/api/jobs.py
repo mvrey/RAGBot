@@ -83,15 +83,23 @@ async def _finish_ingest_job(
 ) -> None:
     """Chunk -> embed -> index -> persist, shared by both ingestion sources."""
     jobs = state.jobs
-    jobs.update(job_id, phase='chunking', message=f'{len(files)} files loaded ({source})')
+    jobs.update(job_id, phase='chunking', message=f'{len(files)} files loaded ({source})', progress=None)
+
+    def _on_chunk_progress(done: int, total: int) -> None:
+        jobs.update(job_id, progress={'current': done, 'total': total})
 
     chunking_strategy = ChunkingStrategy[chunking_name]
-    chunks = await anyio.to_thread.run_sync(repository.chunk, chunking_strategy)
+    chunks = await anyio.to_thread.run_sync(
+        lambda: repository.chunk(chunking_strategy, on_progress=_on_chunk_progress)
+    )
 
     message = f'{len(chunks)} chunks created'
     if len(chunks) > CHUNK_COUNT_WARNING_THRESHOLD:
         message += f' (exceeds the ~{CHUNK_COUNT_WARNING_THRESHOLD} comfort limit; indexing will be slow)'
-    jobs.update(job_id, phase='embedding', message=message)
+    jobs.update(job_id, phase='embedding', message=message, progress=None)
+
+    def _on_embed_progress(done: int, total: int) -> None:
+        jobs.update(job_id, progress={'current': done, 'total': total})
 
     embedder = get_embedder()
     search_strategy = SearchStrategy(embedder=embedder)
@@ -99,11 +107,11 @@ async def _finish_ingest_job(
 
     def _build_vector_index():
         if search_method in (SearchStrategyType.VECTOR, SearchStrategyType.HYBRID):
-            search_strategy.searcher._get_vector_index(chunks)
+            search_strategy.searcher._get_vector_index(chunks, on_progress=_on_embed_progress)
 
     await anyio.to_thread.run_sync(_build_vector_index)
 
-    jobs.update(job_id, phase='indexing', message='Setting up the agent')
+    jobs.update(job_id, phase='indexing', message='Setting up the agent', progress=None)
 
     def _build_agent():
         agent_wrapper = AgentWrapper(

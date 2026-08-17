@@ -1,12 +1,14 @@
 import re
 import secrets
 import shutil
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 
 from ragbot.core.AgentWrapper import AgentWrapper, MAX_FILE_LINES
 from ragbot.core.ChunkingStrategy import ChunkingStrategy
+from ragbot.core.Embeddings import CachingEmbedder, get_embedder
 from ragbot.core.Repository import Repository
 from ragbot.core.SearchStrategy import SearchStrategyType
 from ragbot.core.settings import REPO_CACHE_DIR
@@ -150,6 +152,27 @@ def rename_repo(repo_key: str, payload: RenameRepoRequest) -> RepoDetail:
     return _to_repo_detail(meta)
 
 
+def _evict_repo_embeddings(repo_dir: Path, meta: dict) -> None:
+    """Forget this repo's cached vectors so a later re-ingest re-embeds instead
+    of silently reusing the deleted copy's cache hits - see the CachingEmbedder
+    docstring. Best-effort: any failure here must not block the deletion
+    itself, since a stale cache entry is a cost, not a correctness bug.
+    """
+    chunking_name = meta.get('chunking_strategy')
+    if not chunking_name:
+        return
+    try:
+        embedder = get_embedder()
+        if not isinstance(embedder, CachingEmbedder):
+            return
+        repository = Repository(meta['repo_url'], repo_key=repo_dir.name)
+        repository.load_cached_repo_files()
+        chunks = repository.chunk(ChunkingStrategy[chunking_name])
+        embedder.evict_texts([c.get('chunk', '') for c in chunks])
+    except Exception:
+        pass
+
+
 @router.delete('/{repo_key}', status_code=204)
 def delete_repo(repo_key: str, state: AppState = Depends(get_state)) -> None:
     meta = read_repo_meta(repo_key)
@@ -157,6 +180,7 @@ def delete_repo(repo_key: str, state: AppState = Depends(get_state)) -> None:
         raise HTTPException(404, f"No cached repo '{repo_key}'.")
 
     repo_dir = REPO_CACHE_DIR / repo_key
+    _evict_repo_embeddings(repo_dir, meta)
     shutil.rmtree(repo_dir, ignore_errors=True)
 
     stale_keys = [key for key in state.indexes if key[0] == repo_key]

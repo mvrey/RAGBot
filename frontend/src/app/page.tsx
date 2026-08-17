@@ -39,7 +39,7 @@ export default function HomePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">RAGBot</h1>
-          <p className="text-muted-foreground">Ask questions about your source code and docs&apos;s code and docs.</p>
+          <p className="text-muted-foreground">Ask questions about your source code and docs.</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger render={<Button />}>

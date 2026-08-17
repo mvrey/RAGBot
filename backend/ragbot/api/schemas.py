@@ -87,6 +87,11 @@ class FileContentResponse(BaseModel):
     content: str
 
 
+class JobProgress(BaseModel):
+    current: int
+    total: int
+
+
 class JobStatus(BaseModel):
     id: str
     kind: str
@@ -96,6 +101,10 @@ class JobStatus(BaseModel):
     error: Optional[str] = None
     result: Optional[dict[str, Any]] = None
     created_at: float
+    # Set only during a phase with real sub-progress to report (chunking,
+    # embedding) - None otherwise, including for phases that are effectively
+    # one shot (downloading, indexing).
+    progress: Optional[JobProgress] = None
 
 
 class ConversationCreate(BaseModel):

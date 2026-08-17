@@ -86,6 +86,19 @@ export function JobProgress({ jobId, onSucceeded, onFailed }: JobProgressProps) 
       <p className={cn('text-base', failed ? 'text-destructive' : 'text-muted-foreground')}>
         {job?.error ?? job?.message ?? 'Starting…'}
       </p>
+      {job?.progress && job.status === 'running' && (
+        <div className="space-y-1.5">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
+              style={{ width: `${Math.min(100, (job.progress.current / job.progress.total) * 100)}%` }}
+            />
+          </div>
+          <p className="text-right text-sm tabular-nums text-muted-foreground">
+            {job.progress.current} / {job.progress.total}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

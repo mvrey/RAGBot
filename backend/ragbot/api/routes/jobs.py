@@ -17,6 +17,7 @@ def _to_job_status(job: dict) -> JobStatus:
     return JobStatus(
         id=job['id'], kind=job['kind'], status=job['status'], phase=job['phase'],
         message=job['message'], error=job['error'], result=job['result'], created_at=job['created_at'],
+        progress=job.get('progress'),
     )
 
 

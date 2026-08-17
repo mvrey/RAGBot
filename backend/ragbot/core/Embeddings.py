@@ -38,16 +38,26 @@ OPENAI_BATCH_SIZE = 100
 
 
 class Embedder:
-    """Interface for turning text into vectors."""
+    """Interface for turning text into vectors.
+
+    encode() takes an optional on_progress(done, total) callback, called after
+    each internal batch completes when embedding a corpus (a bare-string query
+    is always a single fast call, so it's never reported). Embedding a large
+    repo can take minutes, and this is the only step in ingestion that can't
+    be reported as one shot - see AgentWrapper's callers for how it becomes a
+    job's progress field.
+    """
 
     name = 'embedder'
 
-    def encode(self, texts) -> np.ndarray:
+    def encode(self, texts, on_progress=None) -> np.ndarray:
         raise NotImplementedError
 
 
 class LocalEmbedder(Embedder):
     """sentence-transformers, run locally. Free, offline, no API key."""
+
+    BATCH_SIZE = 32
 
     def __init__(self, model_name: str = DEFAULT_LOCAL_MODEL):
         self.model_name = model_name
@@ -62,15 +72,26 @@ class LocalEmbedder(Embedder):
             self._model = SentenceTransformer(self.model_name)
         return self._model
 
-    def encode(self, texts) -> np.ndarray:
+    def encode(self, texts, on_progress=None) -> np.ndarray:
         single = isinstance(texts, str)
         batch = [texts] if single else list(texts)
         if not batch:
             return np.empty((0, 0))
 
-        vectors = self._get_model().encode(batch, show_progress_bar=not single)
-        vectors = np.asarray(vectors)
-        return vectors[0] if single else vectors
+        model = self._get_model()
+        if single:
+            return np.asarray(model.encode(batch, show_progress_bar=False))[0]
+
+        # Batched by hand (rather than one call over the whole corpus) so
+        # on_progress can report between batches - sentence-transformers'
+        # own show_progress_bar only writes to the console.
+        vectors = []
+        for start in range(0, len(batch), self.BATCH_SIZE):
+            window = batch[start:start + self.BATCH_SIZE]
+            vectors.extend(model.encode(window, show_progress_bar=False))
+            if on_progress:
+                on_progress(min(start + self.BATCH_SIZE, len(batch)), len(batch))
+        return np.asarray(vectors)
 
 
 class OpenAIEmbedder(Embedder):
@@ -93,7 +114,7 @@ class OpenAIEmbedder(Embedder):
             self._client = OpenAI(api_key=api_key)
         return self._client
 
-    def encode(self, texts) -> np.ndarray:
+    def encode(self, texts, on_progress=None) -> np.ndarray:
         single = isinstance(texts, str)
         batch = [texts] if single else list(texts)
         if not batch:
@@ -108,6 +129,8 @@ class OpenAIEmbedder(Embedder):
             window = prepared[start:start + OPENAI_BATCH_SIZE]
             response = client.embeddings.create(model=self.model_name, input=window)
             vectors.extend(item.embedding for item in response.data)
+            if on_progress and not single:
+                on_progress(len(vectors), len(prepared))
 
         result = np.array(vectors)
         return result[0] if single else result
@@ -172,7 +195,7 @@ class GeminiEmbedder(Embedder):
                     time.sleep(self.RETRY_BASE_DELAY * (2 ** attempt))
         raise last_error
 
-    def encode(self, texts) -> np.ndarray:
+    def encode(self, texts, on_progress=None) -> np.ndarray:
         single = isinstance(texts, str)
         batch = [texts] if single else list(texts)
         if not batch:
@@ -186,6 +209,8 @@ class GeminiEmbedder(Embedder):
         for start in range(0, len(prepared), self.BATCH_SIZE):
             window = prepared[start:start + self.BATCH_SIZE]
             vectors.extend(self._embed_batch(window))
+            if on_progress and not single:
+                on_progress(len(vectors), len(prepared))
 
         result = np.array(vectors)
         return result[0] if single else result
@@ -272,7 +297,26 @@ class CachingEmbedder(Embedder):
             self._index[key] = len(self._keys)
             self._keys.append(key)
 
-    def encode(self, texts) -> np.ndarray:
+    def evict_texts(self, texts) -> int:
+        """Remove cached vectors for the given texts, if present.
+
+        Used when a repo is deleted, so re-ingesting it later re-embeds instead
+        of silently reusing vectors paid for by the deleted copy - see repos.py's
+        delete_repo. Returns the number of rows actually removed.
+        """
+        self._load()
+        to_remove = {self._hash(text) for text in texts} & set(self._index)
+        if not to_remove:
+            return 0
+
+        keep_mask = np.array([key not in to_remove for key in self._keys], dtype=bool)
+        self._keys = [key for key, keep in zip(self._keys, keep_mask) if keep]
+        self._vectors = self._vectors[keep_mask]
+        self._index = {key: row for row, key in enumerate(self._keys)}
+        self._save()
+        return len(to_remove)
+
+    def encode(self, texts, on_progress=None) -> np.ndarray:
         # A bare string is a search query: one-off and unique, so caching it would
         # only bloat the corpus store.
         if isinstance(texts, str):
@@ -292,12 +336,23 @@ class CachingEmbedder(Embedder):
         self.last_misses = sum(1 for h in hashes if h in missing_set)
         self.last_hits = len(batch) - self.last_misses
 
+        if on_progress:
+            # Cache hits cost nothing, so they're immediately "done" - only the
+            # misses represent real work still ahead.
+            on_progress(self.last_hits, len(batch))
+
         if missing:
             first_text = {}
             for key, text in zip(hashes, batch):
                 first_text.setdefault(key, text)
 
-            new_vectors = np.asarray(self.inner.encode([first_text[h] for h in missing]))
+            def _inner_progress(done, _total_missing):
+                if on_progress:
+                    on_progress(self.last_hits + done, len(batch))
+
+            new_vectors = np.asarray(self.inner.encode(
+                [first_text[h] for h in missing], on_progress=_inner_progress,
+            ))
             self._append(missing, new_vectors)
             self._save()
 

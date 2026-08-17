@@ -186,7 +186,7 @@ export function IngestForm({ onIngested }: IngestFormProps) {
       )}
 
       <Button type="submit" size="lg" className="w-full h-14 text-lg" disabled={!isValid || ingest.isPending}>
-        {ingest.isPending ? (mode === 'local' ? 'Zipping & uploading…' : 'Starting…') : 'Ingest repository'}
+        {ingest.isPending ? (mode === 'local' ? 'Zipping & uploading…' : 'Starting…') : 'Ingest'}
       </Button>
     </form>
   );

@@ -268,23 +268,30 @@ class Repository:
         return repository_data
 
 
-    def chunk(self, strategy):
+    def chunk(self, strategy, on_progress=None):
         """Chunk every ingested file, returning a flat list of chunk dicts.
 
         Builds a new list rather than mutating files_dictionary in place, and merges
         each file's metadata into its chunks so filename/language survive into the
         index - citations depend on it.
+
+        on_progress(done, total), if given, is called once per file (fast in
+        practice - see the README's benchmarks - but a large repo's file count
+        can still take a visible moment to get through).
         """
         from ragbot.core.ChunkingStrategy import ChunkingStrategy
 
         self.processed_docs = 0
         self.skipped_docs = 0
         all_chunks = []
+        total = len(self.files_dictionary)
 
-        for doc in self.files_dictionary:
+        for i, doc in enumerate(self.files_dictionary):
             content = doc.get('content')
             if not content or not content.strip():
                 self.skipped_docs += 1
+                if on_progress:
+                    on_progress(i + 1, total)
                 continue
 
             self.processed_docs += 1
@@ -295,6 +302,9 @@ class Repository:
                 merged = dict(file_metadata)
                 merged.update(chunk)
                 all_chunks.append(self._normalise(merged))
+
+            if on_progress:
+                on_progress(i + 1, total)
 
         self.chunks = all_chunks
         return all_chunks
