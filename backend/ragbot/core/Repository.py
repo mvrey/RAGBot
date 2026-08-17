@@ -60,10 +60,13 @@ CHUNK_COUNT_WARNING_THRESHOLD = 5000
 
 class Repository:
 
-    def __init__(self, zip_path: str, cache_dir: Path = REPO_CACHE_DIR):
+    def __init__(self, zip_path: str, cache_dir: Path = REPO_CACHE_DIR, repo_key: str = None):
         self.zip_path = zip_path
         self.cache_dir = Path(cache_dir)
-        self.repo_key = self._slugify(zip_path)
+        # A caller-supplied key is how local-folder uploads get a readable,
+        # collision-free key (e.g. "local_myproject_a1b2c3d4") instead of the
+        # opaque hash _slugify falls back to for a non-codeload "URL".
+        self.repo_key = repo_key or self._slugify(zip_path)
         self.repo_dir = self.cache_dir / self.repo_key
         self.files_dictionary = []
         self.chunks = []
@@ -189,8 +192,22 @@ class Repository:
         if resp.status_code != 200:
             raise Exception(f"Failed to download repository: {resp.status_code}")
 
+        return self._extract_zip(resp.content, strip_root=True)
+
+
+    def load_from_zip_bytes(self, zip_bytes: bytes):
+        """Extract an already-in-memory zip - e.g. one built client-side from a
+        browser-uploaded local folder - without downloading anything. Shares the
+        same filtering, zip-slip guard, and on-disk mirror as get_repo_files, so
+        a local folder is indistinguishable from a downloaded one everywhere
+        else in the pipeline.
+        """
+        return self._extract_zip(zip_bytes, strip_root=True)
+
+
+    def _extract_zip(self, content: bytes, strip_root: bool):
         repository_data = []
-        zf = zipfile.ZipFile(io.BytesIO(resp.content))
+        zf = zipfile.ZipFile(io.BytesIO(content))
 
         for file_info in zf.infolist():
             if file_info.is_dir():
@@ -202,12 +219,14 @@ class Repository:
 
             try:
                 with zf.open(file_info) as f_in:
-                    content = f_in.read().decode('utf-8', errors='ignore')
+                    file_content = f_in.read().decode('utf-8', errors='ignore')
 
-                # Drop the zip's "<repo>-<branch>/" prefix so cached paths match the repo.
-                relative_name = self._strip_root(filename)
-                self._save_to_disk(relative_name, content)
-                repository_data.append(self._build_file_record(relative_name, content))
+                # Drop the zip's leading directory ("<repo>-<branch>/" for a
+                # GitHub download, "<folder-name>/" for an uploaded folder) so
+                # cached paths match the repo either way.
+                relative_name = self._strip_root(filename) if strip_root else filename
+                self._save_to_disk(relative_name, file_content)
+                repository_data.append(self._build_file_record(relative_name, file_content))
             except Exception as e:
                 print(f"Error processing {filename}: {e}")
                 continue

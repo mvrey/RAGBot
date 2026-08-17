@@ -6,13 +6,15 @@ import { streamJobEvents } from '@/lib/api';
 import type { JobPhase, JobStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
-const PHASES: { key: JobPhase; label: string }[] = [
-  { key: 'downloading', label: 'Downloading' },
-  { key: 'chunking', label: 'Chunking' },
-  { key: 'embedding', label: 'Embedding' },
-  { key: 'indexing', label: 'Indexing' },
-  { key: 'ready', label: 'Ready' },
-];
+function phasesFor(kind: string | undefined): { key: JobPhase; label: string }[] {
+  return [
+    { key: 'downloading', label: kind === 'upload' ? 'Extracting' : 'Downloading' },
+    { key: 'chunking', label: 'Chunking' },
+    { key: 'embedding', label: 'Embedding' },
+    { key: 'indexing', label: 'Indexing' },
+    { key: 'ready', label: 'Ready' },
+  ];
+}
 
 interface JobProgressProps {
   jobId: string;
@@ -50,13 +52,14 @@ export function JobProgress({ jobId, onSucceeded, onFailed }: JobProgressProps) 
     return () => controller.abort();
   }, [jobId, onSucceeded, onFailed]);
 
-  const currentIndex = job?.phase ? PHASES.findIndex((p) => p.key === job.phase) : -1;
+  const phases = phasesFor(job?.kind);
+  const currentIndex = job?.phase ? phases.findIndex((p) => p.key === job.phase) : -1;
   const failed = job?.status === 'failed';
 
   return (
     <div className="space-y-6">
       <ol className="flex items-center gap-2">
-        {PHASES.map((phase, i) => {
+        {phases.map((phase, i) => {
           const done = currentIndex > i || (currentIndex === i && job?.status === 'succeeded');
           const active = currentIndex === i && job?.status === 'running';
           return (
@@ -73,7 +76,7 @@ export function JobProgress({ jobId, onSucceeded, onFailed }: JobProgressProps) 
                 )}
                 <span className={cn('whitespace-nowrap', (done || active) && 'font-medium')}>{phase.label}</span>
               </div>
-              {i < PHASES.length - 1 && (
+              {i < phases.length - 1 && (
                 <div className={cn('h-0.5 flex-1', done ? 'bg-emerald-500' : 'bg-border')} />
               )}
             </li>

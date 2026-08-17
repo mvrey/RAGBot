@@ -48,12 +48,20 @@ class RepoSummary(BaseModel):
     file_count: int
     chunk_count: Optional[int] = None
     indexed: bool = False
+    # User-editable label shown in the UI in place of repo_key, which stays
+    # the stable identifier everything else (URLs, index cache, conversations,
+    # the on-disk directory) is keyed by - renaming never touches any of that.
+    display_name: Optional[str] = None
 
 
 class RepoDetail(RepoSummary):
     language_stats: dict[str, int] = Field(default_factory=dict)
     chunking_strategy: Optional[str] = None
     search_method: Optional[str] = None
+
+
+class RenameRepoRequest(BaseModel):
+    display_name: str
 
 
 class FileNode(BaseModel):

@@ -1,7 +1,20 @@
+import io
+import json
+import zipfile
+
 import pytest
 
 from ragbot.core.Repository import Repository, MAX_FILE_BYTES
 from ragbot.core.ChunkingStrategy import ChunkingStrategy
+
+
+def _build_zip(entries: dict) -> bytes:
+    """entries: {path-within-zip: text-content}."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w') as zf:
+        for path, content in entries.items():
+            zf.writestr(path, content)
+    return buf.getvalue()
 
 
 class TestFileSelection:
@@ -192,3 +205,82 @@ class TestDiskCache:
     def test_strip_root_removes_the_zip_prefix(self):
         assert Repository._strip_root("repo-main/src/app.py") == "src/app.py"
         assert Repository._strip_root("app.py") == "app.py"
+
+
+class TestRepoKeyOverride:
+
+    def test_explicit_repo_key_is_used_instead_of_slugifying(self, tmp_path):
+        repo = Repository("local:myproject", cache_dir=tmp_path, repo_key="local_myproject_ab12")
+
+        assert repo.repo_key == "local_myproject_ab12"
+        assert repo.repo_dir == tmp_path / "local_myproject_ab12"
+
+    def test_no_repo_key_falls_back_to_slugify(self, tmp_path):
+        repo = Repository("https://codeload.github.com/o/r/zip/refs/heads/main", cache_dir=tmp_path)
+
+        assert repo.repo_key == "o_r_main"
+
+    def test_local_pseudo_url_has_no_blob_url_base(self, tmp_path):
+        repo = Repository("local:myproject", cache_dir=tmp_path, repo_key="local_myproject_ab12")
+
+        assert repo.blob_url_base() is None
+
+
+class TestLoadFromZipBytes:
+
+    def _repo(self, tmp_path):
+        return Repository("local:myproject", cache_dir=tmp_path, repo_key="local_myproject_ab12")
+
+    def test_extracts_included_files_and_mirrors_them_to_disk(self, tmp_path):
+        repo = self._repo(tmp_path)
+        zip_bytes = _build_zip({
+            "myproject/src/app.py": "def f(): pass",
+            "myproject/README.md": "# hi",
+        })
+
+        files = repo.load_from_zip_bytes(zip_bytes)
+
+        names = {f['filename'] for f in files}
+        assert names == {"src/app.py", "README.md"}
+        assert (repo.repo_dir / "src" / "app.py").read_text(encoding='utf-8') == "def f(): pass"
+
+    def test_filters_excluded_files_the_same_as_a_download(self, tmp_path):
+        repo = self._repo(tmp_path)
+        zip_bytes = _build_zip({
+            "myproject/src/app.py": "def f(): pass",
+            "myproject/node_modules/lib/index.js": "module.exports = {}",
+            "myproject/package-lock.json": "{}",
+        })
+
+        files = repo.load_from_zip_bytes(zip_bytes)
+
+        assert {f['filename'] for f in files} == {"src/app.py"}
+
+    def test_writes_meta_with_the_pseudo_url_as_repo_url(self, tmp_path):
+        repo = self._repo(tmp_path)
+        repo.load_from_zip_bytes(_build_zip({"myproject/a.py": "x = 1"}))
+
+        meta = json.loads((repo.repo_dir / "_meta.json").read_text(encoding='utf-8'))
+        assert meta['repo_url'] == "local:myproject"
+        assert meta['file_count'] == 1
+
+    def test_traversal_past_the_allowlist_is_filtered(self, tmp_path):
+        repo = self._repo(tmp_path)
+        # No matching extension/filename, so this never reaches the zip-slip
+        # guard at all - it's rejected by should_include() first.
+        zip_bytes = _build_zip({"../../etc/passwd": "malicious"})
+
+        assert repo.load_from_zip_bytes(zip_bytes) == []
+
+    def test_traversal_with_an_allowed_extension_hits_the_zip_slip_guard(self, tmp_path):
+        repo = self._repo(tmp_path)
+        # _strip_root() drops the first path segment (the zip's top-level
+        # folder), which incidentally neutralises a single "../" - so this
+        # needs a second one to actually still be a traversal afterwards,
+        # reaching should_include() (".py" passes) and then only being
+        # stopped by _resolve_safe_path() refusing to write outside repo_dir.
+        zip_bytes = _build_zip({"myproject/../../escape.py": "malicious = True"})
+
+        assert repo.load_from_zip_bytes(zip_bytes) == []
+        assert not (tmp_path / "escape.py").exists()
+        assert not (tmp_path / "escape.py").exists()

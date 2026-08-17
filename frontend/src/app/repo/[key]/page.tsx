@@ -2,20 +2,24 @@
 
 import { use, useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Files, FileCode2 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, Files, FileCode2, Pencil } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { CitationMatch } from '@/lib/citations';
 import { ChatPanel } from '@/components/ChatPanel';
 import { FileTree } from '@/components/FileTree';
+import { RenameRepoDialog, type RenameTarget } from '@/components/RenameRepoDialog';
 import { SourceViewer, type OpenTarget } from '@/components/SourceViewer';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export default function RepoWorkspacePage({ params }: { params: Promise<{ key: string }> }) {
   const { key: repoKey } = use(params);
+  const queryClient = useQueryClient();
   const [target, setTarget] = useState<OpenTarget | null>(null);
   const [tab, setTab] = useState('source');
+  const [renaming, setRenaming] = useState<RenameTarget | null>(null);
 
   const { data: repo, isLoading, isError } = useQuery({
     queryKey: ['repo', repoKey],
@@ -52,9 +56,18 @@ export default function RepoWorkspacePage({ params }: { params: Promise<{ key: s
         {isLoading ? (
           <Skeleton className="h-5 w-48" />
         ) : (
-          <div className="flex items-center gap-2">
-            <span className="font-medium">{repo?.repo_key}</span>
-            <span className="text-sm text-muted-foreground">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-medium">{repo?.display_name ?? repo?.repo_key}</span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+              aria-label="Rename repository"
+              onClick={() => repo && setRenaming({ repo_key: repo.repo_key, display_name: repo.display_name })}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+            <span className="shrink-0 text-sm text-muted-foreground">
               {repo?.chunking_strategy} · {repo?.search_method}
             </span>
           </div>
@@ -92,6 +105,15 @@ export default function RepoWorkspacePage({ params }: { params: Promise<{ key: s
           </Tabs>
         </section>
       </div>
+
+      <RenameRepoDialog
+        repo={renaming}
+        onClose={() => setRenaming(null)}
+        onRenamed={() => {
+          queryClient.invalidateQueries({ queryKey: ['repo', repoKey] });
+          setRenaming(null);
+        }}
+      />
     </main>
   );
 }

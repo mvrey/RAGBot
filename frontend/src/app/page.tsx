@@ -3,10 +3,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FolderGit2, Plus, Trash2 } from 'lucide-react';
+import { FolderGit2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { RepoSummary } from '@/lib/types';
 import { IngestForm } from '@/components/IngestForm';
+import { RenameRepoDialog, type RenameTarget } from '@/components/RenameRepoDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -17,6 +18,7 @@ export default function HomePage() {
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [repoToDelete, setRepoToDelete] = useState<RepoSummary | null>(null);
+  const [repoToRename, setRepoToRename] = useState<RenameTarget | null>(null);
   const { data: repos, isLoading } = useQuery({ queryKey: ['repos'], queryFn: api.listRepos });
 
   const openRepo = (repoKey: string) => {
@@ -37,16 +39,16 @@ export default function HomePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">RAGBot</h1>
-          <p className="text-muted-foreground">Ask questions about a GitHub repository&apos;s code and docs.</p>
+          <p className="text-muted-foreground">Ask questions about your source code and docs&apos;s code and docs.</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger render={<Button />}>
             <Plus className="size-4" />
-            Ingest a repo
+            New project
           </DialogTrigger>
           <DialogContent className="sm:max-w-2xl p-8 gap-6">
             <DialogHeader>
-              <DialogTitle className="text-2xl">Ingest a GitHub repository</DialogTitle>
+              <DialogTitle className="text-2xl">Ingest sources</DialogTitle>
             </DialogHeader>
             <IngestForm onIngested={openRepo} />
           </DialogContent>
@@ -73,11 +75,23 @@ export default function HomePage() {
             onClick={() => router.push(`/repo/${repo.repo_key}`)}
           >
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <FolderGit2 className="size-4 text-muted-foreground" />
-                {repo.repo_key}
+              <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+                <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
+                <span className="truncate">{repo.display_name ?? repo.repo_key}</span>
               </CardTitle>
-              <CardAction>
+              <CardAction className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label={`Rename ${repo.repo_key}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRepoToRename(repo);
+                  }}
+                >
+                  <Pencil className="size-4" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -92,11 +106,16 @@ export default function HomePage() {
                 </Button>
               </CardAction>
             </CardHeader>
-            <CardContent className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-              <span>{repo.file_count} files</span>
-              {repo.chunk_count != null && <span>{repo.chunk_count} chunks</span>}
-              <span>{repo.indexed ? 'Indexed' : 'Not indexed'}</span>
-              <span>{new Date(repo.downloaded_at).toLocaleString()}</span>
+            <CardContent className="flex flex-col gap-1">
+              {repo.display_name && (
+                <span className="truncate font-mono text-xs text-muted-foreground/70">{repo.repo_key}</span>
+              )}
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                <span>{repo.file_count} files</span>
+                {repo.chunk_count != null && <span>{repo.chunk_count} chunks</span>}
+                <span>{repo.indexed ? 'Indexed' : 'Not indexed'}</span>
+                <span>{new Date(repo.downloaded_at).toLocaleString()}</span>
+              </div>
             </CardContent>
           </Card>
         ))}
@@ -129,6 +148,15 @@ export default function HomePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <RenameRepoDialog
+        repo={repoToRename}
+        onClose={() => setRepoToRename(null)}
+        onRenamed={() => {
+          queryClient.invalidateQueries({ queryKey: ['repos'] });
+          setRepoToRename(null);
+        }}
+      />
     </main>
   );
 }

@@ -3,6 +3,20 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* @base-ui/react components (this project's shadcn "base-nova" style) toggle
+ * plain boolean/value data-attributes (data-open, data-orientation="...", …)
+ * rather than Radix's data-state="open" convention. Tailwind's bracketed
+ * data-[open] form works without registration, but the bare shorthand the
+ * installed components actually use (data-open:, data-horizontal:, …), and
+ * its group-data- and peer-data- composed forms, need these registered once. */
+@custom-variant data-open (&[data-open]);
+@custom-variant data-closed (&[data-closed]);
+@custom-variant data-disabled (&[data-disabled]);
+@custom-variant data-placeholder (&[data-placeholder]);
+@custom-variant data-active (&[data-active]);
+@custom-variant data-horizontal (&[data-orientation="horizontal"]);
+@custom-variant data-vertical (&[data-orientation="vertical"]);
+
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);
