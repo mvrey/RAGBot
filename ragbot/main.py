@@ -8,13 +8,14 @@ questions or evaluating an answer without opening a browser.
 """
 
 import argparse
-import asyncio
 import json
 
+from src.AsyncRunner import AsyncRunner
 from src.Repository import Repository
 from src.ChunkingStrategy import ChunkingStrategy
 from src.SearchStrategy import SearchStrategy, SearchStrategyType
 from src.Embeddings import get_embedder
+from src.LLM import get_model_name, missing_api_key
 from src.AgentWrapper import AgentWrapper
 from src.AgentLog import AgentLog
 from src.Prompts import Prompts
@@ -45,6 +46,11 @@ def build_agent(repo_url: str, use_cache: bool, search_method: SearchStrategyTyp
         search_method=search_method,
         repo_dir=repository.repo_dir,
     )
+    missing = missing_api_key()
+    if missing:
+        raise SystemExit(f"{missing} is not set. Add it to .env to use {get_model_name()}.")
+
+    print(f"Chat model: {get_model_name()}")
     agent_wrapper.setup(Prompts.system_prompt_for(repository.blob_url_base()))
     return agent_wrapper
 
@@ -56,7 +62,7 @@ async def evaluate(agent_log: AgentLog, log_record):
 
     eval_agent = Agent(
         name='eval_agent',
-        model='gpt-4.1-nano',
+        model=get_model_name(),
         instructions=Prompts.EVALUATION_PROMPT,
         output_type=EvaluationChecklist,
     )
@@ -78,8 +84,13 @@ def main():
 
     agent_wrapper = build_agent(args.repo, args.cached, SearchStrategyType[args.search])
 
+    # One shared loop: the HTTP client is reused across the answer and the
+    # evaluation call, and a per-call asyncio.run() would close it out from under
+    # the second one.
+    runner = AsyncRunner()
+
     print(f"\nQuestion: {args.question}\n")
-    result = asyncio.run(agent_wrapper.run(args.question))
+    result = runner.run(agent_wrapper.run(args.question))
     print(result['response'])
 
     agent_log = AgentLog()
@@ -90,11 +101,13 @@ def main():
 
     if args.evaluate:
         log_record = agent_log.load_log_file(log_path)
-        evaluation = asyncio.run(evaluate(agent_log, log_record))
+        evaluation = runner.run(evaluate(agent_log, log_record))
         print(f"\nEvaluation: {evaluation.summary}")
         for check in evaluation.checklist:
             status = "PASS" if check.check_pass else "FAIL"
             print(f"  [{status}] {check.check_name}: {check.justification}")
+
+    runner.close()
 
 
 if __name__ == '__main__':

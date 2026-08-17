@@ -1,11 +1,11 @@
-import asyncio
-
 import streamlit as st
 
+from src.AsyncRunner import AsyncRunner
 from src.Repository import Repository, CHUNK_COUNT_WARNING_THRESHOLD
 from src.ChunkingStrategy import ChunkingStrategy
 from src.SearchStrategy import SearchStrategy, SearchStrategyType
 from src.Embeddings import get_embedder
+from src.LLM import get_model_name, missing_api_key
 from src.AgentWrapper import AgentWrapper
 from src.AgentLog import AgentLog
 from src.Prompts import Prompts
@@ -79,10 +79,22 @@ defaults = {
     "search_strategy": None,
     "search_method": None,
     "messages": [],
+    "history": None,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+
+@st.cache_resource
+def get_async_runner():
+    """One event loop for the whole app.
+
+    Cached as a resource rather than kept in session_state so the loop and its
+    thread survive Streamlit's script reruns; the HTTP client underneath
+    pydantic-ai stays bound to a loop that is still alive.
+    """
+    return AsyncRunner()
 
 
 def _reset_downstream():
@@ -91,6 +103,7 @@ def _reset_downstream():
     st.session_state.agent_wrapper = None
     st.session_state.chunks = None
     st.session_state.messages = []
+    st.session_state.history = None
 
 
 def _report_ingestion(repository, files):
@@ -179,8 +192,13 @@ def init_agent():
     if not st.session_state.repo_indexed:
         st.warning("Index the repo first.")
         return
+    missing = missing_api_key()
+    if missing:
+        st.error(f"❌ {missing} is not set. Add it to .env to use {get_model_name()}.")
+        return
+
     if st.session_state.agent_wrapper is None:
-        st.write("🤖 Initializing agent...")
+        st.write(f"🤖 Initializing agent ({get_model_name()})...")
         repository = st.session_state.repository
         agent_wrapper = AgentWrapper(
             st.session_state.chunks,
@@ -256,7 +274,15 @@ st.divider()
 
 # --- Chat Section ---
 if st.session_state.agent_wrapper:
-    st.subheader("💬 Chat with the codebase")
+    header_col, clear_col = st.columns([4, 1])
+    with header_col:
+        st.subheader("💬 Chat with the codebase")
+    with clear_col:
+        if st.button("🗑️ Clear chat"):
+            st.session_state.messages = []
+            st.session_state.history = None
+            st.rerun()
+
     agent_wrapper = st.session_state.agent_wrapper
     agent_log = AgentLog()
 
@@ -274,10 +300,16 @@ if st.session_state.agent_wrapper:
         # Assistant response
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = asyncio.run(agent_wrapper.run(prompt))
+                response = get_async_runner().run(
+                    # Passing the prior run's messages is what makes follow-up
+                    # questions ("what about the fallback?") resolve against the
+                    # earlier answer instead of starting cold.
+                    agent_wrapper.run(prompt, message_history=st.session_state.history)
+                )
                 answer = response['response']
                 st.markdown(answer)
 
+        st.session_state.history = response['conversation']
         st.session_state.messages.append({"role": "assistant", "content": answer})
 
         agent_log.log_interaction_to_file(

@@ -23,7 +23,7 @@ Also: [Known limitations](#known-limitations).
 
 ## a. Quick setup
 
-**Requirements:** Python 3.13+ and an OpenAI API key (used for the chat model; embeddings run locally by default).
+**Requirements:** Python 3.13+ and a **Google Gemini API key** ([get one here](https://aistudio.google.com/apikey)) for the chat model. Embeddings run locally by default, so no OpenAI key is needed unless you switch the embedding provider or the chat model.
 
 ```bash
 # 1. Create a virtual environment
@@ -41,7 +41,7 @@ cp .env.example .env              # then edit .env and add your key
 `.env` must contain at least:
 
 ```
-OPENAI_API_KEY=sk-...
+GOOGLE_API_KEY=...
 ```
 
 **Run the web app** (from the `ragbot/` directory, which is where the `src.*` imports resolve):
@@ -79,7 +79,7 @@ pytest
 GitHub zip ──► Repository ──► chunkers ──► SearchStrategy ──► AgentWrapper ──► Streamlit / CLI
                    │                            │                  │
               data/repos/                  minsearch          pydantic-ai
-            (source mirror)           (TF-IDF + vectors)    (3 tools, gpt-4.1-nano)
+            (source mirror)           (TF-IDF + vectors)   (3 tools, Gemini Flash)
                    │                            │                  │
                    │                     data/index/               │
                    │                  (embedding cache)            │
@@ -101,6 +101,8 @@ both walk the repo tree, and would otherwise pick up cache files as source code.
 | `src/TextChunker.py` | Markdown/prose chunking (headings, paragraphs, sliding window, LLM) |
 | `src/ChunkingStrategy.py` | Strategy enum; `AUTO` dispatches per file type |
 | `src/Embeddings.py` | Pluggable embedding providers (local / OpenAI) and the on-disk vector cache |
+| `src/LLM.py` | Chat-model selection from `.env`, and up-front credential checks |
+| `src/AsyncRunner.py` | One long-lived event loop, so pooled HTTP connections survive between turns |
 | `src/TextSearcher.py` | Keyword, vector, and hybrid (RRF) retrieval over minsearch |
 | `src/SearchStrategy.py` | Retrieval-mode dispatch |
 | `src/AgentWrapper.py` | pydantic-ai agent and its three tools |
@@ -161,19 +163,34 @@ LLM-as-judge checklist against a fixed question set in CI and alert on regressio
 
 ### LLM selection
 
-**Final choice:** `gpt-4.1-nano`, via pydantic-ai.
+**Final choice:** `google-gla:gemini-3.5-flash`, via pydantic-ai. Configurable in `.env`:
+
+```
+LLM_MODEL=google-gla:gemini-3.5-flash   # default
+LLM_MODEL=google-gla:gemini-3.7-flash   # newest Flash, tuned for agentic/coding work
+LLM_MODEL=openai:gpt-4.1-nano           # previous default
+```
 
 | Option | Trade-off |
 |---|---|
-| **gpt-4.1-nano** (chosen) | Cheapest and fastest of the 4.1 family, reliable at tool calling — which is most of what this agent does. Weaker at multi-step reasoning across several files. |
-| gpt-4.1-mini / larger | Noticeably better at synthesising an answer from several files; higher latency and cost per query. |
+| **Gemini 3.5 Flash** (chosen) | Fast and cheap, with a large context window that suits reading several source files in one turn. Requires a `GOOGLE_API_KEY`. |
+| Gemini 3.7 Flash | Google positions it explicitly for "complex coding, agentic workflows, and reliable multi-step execution" — the closest fit to this use case. One line to switch, and worth benchmarking against 3.5. |
+| gpt-4.1-nano (previous) | Cheapest of the 4.1 family and reliable at tool calling, but weaker at reasoning across several files. |
 | Local model (Ollama etc.) | No API spend and fully offline, but tool-calling reliability drops sharply, and this agent depends on it. |
 
-The same model backs the evaluation agent. **Currently the model name is a constructor default in
-`AgentWrapper` rather than an environment variable** — making it configurable is a small, obvious
-improvement that hasn't been done yet.
+Because pydantic-ai takes provider-prefixed model strings, switching provider is a `.env` change rather
+than a code change — `src/LLM.py` owns the default and reports a missing credential **by name, before the
+first question** rather than failing mid-query. The same model backs the evaluation agent.
 
-> _Your take: why nano was the right default for this exercise, and when you'd move up._
+**One trap worth recording**, since it only appears on the *second* message and so survives a quick smoke
+test: `asyncio.run()` closes its event loop on return, but the Google and OpenAI clients underneath
+pydantic-ai keep a persistent httpx connection pool bound to whichever loop first used it. A second
+`asyncio.run()` therefore dies with `RuntimeError: Event loop is closed` as the pool touches the dead loop.
+`src/AsyncRunner.py` keeps one loop alive on a dedicated thread for the process lifetime, which fixes it
+and lets connections be reused across turns. The CLI hit the same bug between its answer and `--evaluate`
+calls.
+
+> _Your take: why Gemini Flash over the OpenAI default, and whether latency, cost, or context drove it._
 
 ### Embedding model
 
@@ -328,9 +345,9 @@ relevance, clarity, citations, completeness, whether search was actually called,
 grounded in retrieved code. `main.py --evaluate` scores the answer you just got, and
 `Prompts.QUESTION_GENERATION_PROMPT` generates test questions from the corpus to evaluate in bulk.
 
-**94 tests** cover chunking across six languages and its fallback paths, file selection, path-traversal
+**119 tests** cover chunking across six languages and its fallback paths, file selection, path-traversal
 rejection, RRF ordering, embedding-cache correctness (reuse, invalidation, model isolation, corruption
-recovery), and the metadata-preservation regressions.
+recovery), model/credential resolution, event-loop reuse, and the metadata-preservation regressions.
 
 ### Observability
 
@@ -415,7 +432,7 @@ chunk count), warns past the ~5000-chunk comfort limit, and shows embedding-cach
 Technical backlog, roughly in the order I'd tackle it:
 
 1. Containerize (Dockerfile + compose) — the clearest gap against the brief.
-2. Make the chat model configurable via `.env` rather than a constructor default.
+2. Benchmark Gemini 3.5 Flash against 3.7 Flash on the evaluation checklist before settling the default.
 3. Prune the embedding cache (LRU cap or a `--clear-cache` command); it currently grows unbounded.
 4. A fixed evaluation question set wired into CI, so retrieval changes are measured rather than eyeballed.
 5. Streaming responses, and surfacing retrieved sources in the UI alongside the answer.
@@ -461,4 +478,5 @@ Technical backlog, roughly in the order I'd tackle it:
 - **Binary and generated files are skipped entirely**, so questions about assets or build output can't be
   answered.
 - **Local embeddings are the weakest link** in retrieval quality — see the embedding section.
-- **gpt-4.1-nano** is cheap and fast but reasons less well over multi-file questions than a larger model.
+- **Gemini 3.5 Flash** is cheap and fast, but a larger model reasons better over multi-file questions.
+  `LLM_MODEL` in `.env` switches it; 3.7 Flash is the newer, more agentic option and is untested here.

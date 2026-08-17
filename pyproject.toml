@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "minsearch>=0.0.5",
     "openai>=1.108.2",
-    "pydantic-ai-slim[openai]==1.0.9",
+    "pydantic-ai-slim[openai,google]==1.0.9",
     "python-dotenv>=1.0.0",
     "python-frontmatter>=1.1.0",
     "requests>=2.32.5",

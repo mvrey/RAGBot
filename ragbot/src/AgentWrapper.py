@@ -3,6 +3,7 @@ from typing import List, Dict
 
 from pydantic_ai import Agent
 
+from src.LLM import get_model_name
 from src.SearchStrategy import SearchStrategy, SearchStrategyType
 
 # Caps that keep a single tool call from swallowing the context window.
@@ -17,7 +18,7 @@ class AgentWrapper:
         self,
         documents: List[Dict],
         agent_name: str = "faq_agent",
-        model: str = "gpt-4.1-nano",
+        model: str = None,
         search_strategy: SearchStrategy = None,
         search_method: SearchStrategyType = SearchStrategyType.HYBRID,
         repo_dir: Path = None,
@@ -25,7 +26,7 @@ class AgentWrapper:
     ):
         self.documents = documents
         self.agent_name = agent_name
-        self.model = model
+        self.model = model or get_model_name()
         self.search_strategy = search_strategy or SearchStrategy()
         self.search_method = search_method
         self.repo_dir = Path(repo_dir) if repo_dir else None
