@@ -23,43 +23,62 @@ Also: [Known limitations](#known-limitations).
 
 ## a. Quick setup
 
-**Requirements:** Python 3.13+ and a **Google Gemini API key** ([get one here](https://aistudio.google.com/apikey)) for the chat model. Embeddings run locally by default, so no OpenAI key is needed unless you switch the embedding provider or the chat model.
+The app is a FastAPI backend + Next.js frontend, split into `backend/` and `frontend/`. **Requirements:**
+a **Google Gemini API key** ([get one here](https://aistudio.google.com/apikey)) — used for both the chat
+model and the default embedding provider.
+
+### Docker Compose (recommended — closest to how this would actually run)
 
 ```bash
-# 1. Create a virtual environment
+cp backend/.env.example backend/.env      # then edit backend/.env and add GOOGLE_API_KEY
+docker compose up --build
+```
+
+- Backend: http://localhost:8000 (docs at `/docs`, health at `/api/health`)
+- Frontend: http://localhost:3000
+
+`docker-compose.yml` mounts named volumes for the repo mirror, embedding cache, and interaction logs, so
+they survive a rebuild. The frontend's `NEXT_PUBLIC_API_URL` is baked in at **build** time (see the gotcha
+in section b), so if you change ports, rebuild rather than just restarting the container.
+
+### Running each half locally, without Docker
+
+**Backend** (Python 3.13+):
+
+```bash
+cd backend
 python -m venv .venv
-.venv\Scripts\Activate.ps1        # Windows PowerShell
-# source .venv/bin/activate       # Linux / macOS
+.venv\Scripts\Activate.ps1                # Windows PowerShell
+# source .venv/bin/activate               # Linux / macOS
+pip install -e .                          # add '.[local-embeddings]' for EMBEDDING_PROVIDER=local
+cp .env.example .env                      # then edit .env and add GOOGLE_API_KEY
 
-# 2. Install dependencies
-pip install -e .
-
-# 3. Configure your API key
-cp .env.example .env              # then edit .env and add your key
+python -m uvicorn ragbot.api.main:app --reload
+# or, without installing: uvicorn ragbot.api.main:app --reload --app-dir backend
 ```
 
-`.env` must contain at least:
-
-```
-GOOGLE_API_KEY=...
-```
-
-**Run the web app** (from the `ragbot/` directory, which is where the `src.*` imports resolve):
+**Frontend** (Node 22+), in a second terminal:
 
 ```bash
-cd ragbot
-streamlit run app.py
+cd frontend
+npm install
+cp .env.example .env.local                # NEXT_PUBLIC_API_URL=http://localhost:8000
+npm run dev
 ```
 
-Then work through the pipeline in the UI: **Download Repo → Chunk → Index → Initialize Agent**, and chat.
-Already-downloaded repos can be re-loaded from disk with **Load Cached Repo**, skipping the network fetch.
-
-**Or use the CLI:**
+Open http://localhost:3000, ingest a repo, and chat. Or drive the backend directly:
 
 ```bash
-cd ragbot
-python main.py --question "How does hybrid search combine results?"
-python main.py --repo <codeload-zip-url> --question "..." --cached --evaluate
+curl -X POST localhost:8000/api/repos -H 'Content-Type: application/json' \
+  -d '{"repo_url": "https://codeload.github.com/<owner>/<repo>/zip/refs/heads/main", "chunking_strategy": "AUTO", "search_method": "HYBRID"}'
+```
+
+**Or use the CLI**, a thin wrapper over the same pipeline for one-off questions without a browser:
+
+```bash
+cd backend
+python -m ragbot.cli --question "How does hybrid search combine results?"
+python -m ragbot.cli --repo <codeload-zip-url> --question "..." --cached --evaluate
 ```
 
 Repo URLs are `codeload.github.com` zip links, e.g.
@@ -68,7 +87,8 @@ Repo URLs are `codeload.github.com` zip links, e.g.
 **Run the tests:**
 
 ```bash
-pytest
+cd backend && pytest                      # 155 tests
+cd frontend && npm test                   # 34 tests (vitest)
 ```
 
 ---
@@ -76,43 +96,59 @@ pytest
 ## b. Architecture overview
 
 ```
-GitHub zip ──► Repository ──► chunkers ──► SearchStrategy ──► AgentWrapper ──► Streamlit / CLI
-                   │                            │                  │
-              data/repos/                  minsearch          pydantic-ai
-            (source mirror)           (TF-IDF + vectors)   (3 tools, Gemini Flash)
-                   │                            │                  │
-                   │                     data/index/               │
-                   │                  (embedding cache)            │
-                   │                                               │
-                   └──────────── read_file / list_files ───────────┘
-                                                                   │
-                                                             logs/*.json
-                                                          (+ LLM-as-judge eval)
+                    ┌─────────────────────────── backend (FastAPI) ───────────────────────────┐
+                    │                                                                          │
+GitHub zip ──► Repository ──► chunkers ──► SearchStrategy ──► AgentWrapper ──► SSE (tokens,     │
+                    │              │              │                 │          tool calls,     │──► Next.js
+               data/repos/     minsearch      data/index/       pydantic-ai    citations, done) │    frontend
+             (source mirror) (TF-IDF+vectors) (embedding cache) (3 tools, Gemini)                │    (chat +
+                    │                                                │                          │   source
+                    └──────────────────── read_file / list_files ────┘                          │   viewer)
+                    │                                                                            │
+              index cache · job registry · conversation store  (in-process, keyed, LRU-capped)   │
+                    │                                                                            │
+                    └────────────────────────────── logs/*.json ───────────────────────────────┘
+                                                (+ LLM-as-judge eval)
 ```
 
-`data/repos/` is a faithful mirror of the repository; `data/index/` holds derived
-artefacts. They are kept apart deliberately — ingestion and the agent's `list_files`
-both walk the repo tree, and would otherwise pick up cache files as source code.
+`backend/data/repos/` is a faithful mirror of the repository; `backend/data/index/` holds derived
+artefacts. They are kept apart deliberately — ingestion and the agent's `list_files` both walk the repo
+tree, and would otherwise pick up cache files as source code. Both are env-driven (`RAGBOT_DATA_DIR`,
+`RAGBOT_LOG_DIR`) so a container can point them at a mounted volume instead of the package's on-disk
+location. Everything below `ragbot/core/` is UI-agnostic — the FastAPI layer is the only thing that knows
+about HTTP, and the CLI (`ragbot/cli.py`) exercises the exact same pipeline for one-off questions.
 
 | Module | Responsibility |
 |---|---|
-| `src/Repository.py` | Downloads the repo zip, filters files, mirrors them to an on-disk cache, dispatches chunking |
-| `src/CodeChunker.py` | tree-sitter AST chunking; falls back to line windows |
-| `src/TextChunker.py` | Markdown/prose chunking (headings, paragraphs, sliding window, LLM) |
-| `src/ChunkingStrategy.py` | Strategy enum; `AUTO` dispatches per file type |
-| `src/Embeddings.py` | Pluggable embedding providers (local / OpenAI) and the on-disk vector cache |
-| `src/LLM.py` | Chat-model selection from `.env`, and up-front credential checks |
-| `src/AsyncRunner.py` | One long-lived event loop, so pooled HTTP connections survive between turns |
-| `src/TextSearcher.py` | Keyword, vector, and hybrid (RRF) retrieval over minsearch |
-| `src/SearchStrategy.py` | Retrieval-mode dispatch |
-| `src/AgentWrapper.py` | pydantic-ai agent and its three tools |
-| `src/Prompts.py` | System prompt, evaluation checklist, question generation |
-| `src/AgentLog.py` | Per-interaction JSON logs and LLM-as-judge scoring |
+| `backend/ragbot/core/Repository.py` | Downloads the repo zip, filters files, mirrors them to an on-disk cache, dispatches chunking |
+| `backend/ragbot/core/CodeChunker.py` | tree-sitter AST chunking; falls back to line windows |
+| `backend/ragbot/core/TextChunker.py` | Markdown/prose chunking (headings, paragraphs, sliding window, LLM) |
+| `backend/ragbot/core/ChunkingStrategy.py` | Strategy enum; `AUTO` dispatches per file type |
+| `backend/ragbot/core/Embeddings.py` | Pluggable embedding providers (Google / local / OpenAI) and the on-disk vector cache |
+| `backend/ragbot/core/LLM.py` | Chat-model selection from `.env`, and up-front credential checks |
+| `backend/ragbot/core/TextSearcher.py` | Keyword, vector, and hybrid (RRF) retrieval over minsearch |
+| `backend/ragbot/core/SearchStrategy.py` | Retrieval-mode dispatch |
+| `backend/ragbot/core/AgentWrapper.py` | pydantic-ai agent, its three tools, and the SSE event stream (`run_stream`) |
+| `backend/ragbot/core/Prompts.py` | System prompt, evaluation checklist, question generation |
+| `backend/ragbot/core/AgentLog.py` | Per-interaction JSON logs and LLM-as-judge scoring |
+| `backend/ragbot/core/settings.py` | Env-driven data/log paths |
+| `backend/ragbot/api/main.py` | FastAPI app, CORS, lifespan-managed state |
+| `backend/ragbot/api/routes/` | `meta` (health/config), `repos` (ingest/files), `jobs` (SSE progress), `chat` (conversations, SSE tokens) |
+| `backend/ragbot/api/state.py` | Index cache (LRU), conversation store, job registry — keyed, not global |
+| `backend/ragbot/api/jobs.py` | Background ingestion job: download → chunk → embed → index |
+| `backend/ragbot/cli.py` | Command-line entry point over the same core pipeline |
+| `frontend/src/lib/api.ts` | Typed fetch client, including the two SSE-consuming generators |
+| `frontend/src/lib/sse.ts` | SSE framing parser (used for both the job and chat streams) |
+| `frontend/src/lib/citations.ts` | Parses `path:start-end` citations out of an answer for the clickable chips |
+| `frontend/src/components/ChatPanel.tsx` | Streams an answer; renders tool calls as collapsible steps |
+| `frontend/src/components/SourceViewer.tsx` | Opens a cited file, syntax-highlighted, scrolled to and highlighting the cited lines |
 
 **Ingestion.** The repo zip is fetched once and every file worth indexing is written to
-`ragbot/data/repos/<owner>_<repo>_<branch>/`. That cache is what makes `read_file` and `list_files`
-possible, and it means re-runs don't re-download. Zip entries are untrusted input, so paths are resolved
-and checked against the cache root before writing (zip-slip guard).
+`backend/data/repos/<owner>_<repo>_<branch>/`. That cache is what makes `read_file`, `list_files`, and the
+API's file-tree/file-content endpoints possible, and it means re-runs don't re-download. Zip entries are
+untrusted input, so paths are resolved and checked against the cache root before writing (zip-slip guard);
+the same path-resolution helper (`AgentWrapper.safe_repo_path`) is reused, not reimplemented, by the
+`/files/{path}` endpoint — that route is reachable by anyone who can call the API, not just the model.
 
 File selection uses an **allowlist** of ~35 extensions plus `Dockerfile`/`Makefile`. A denylist would be
 one missing entry away from feeding a binary to the indexer; an allowlist fails safe by skipping instead.
@@ -128,6 +164,38 @@ and hybrid mode fuses the two ranked lists with reciprocal rank fusion.
 - `search_code(query)` — hybrid retrieval over the chunk index
 - `read_file(path, start_line, end_line)` — read the real file to confirm before explaining
 - `list_files(subdirectory)` — orient in the repo structure
+
+### Trade-offs made splitting into backend + frontend
+
+Three decisions were made explicitly for a single-instance demo, each with a stated upgrade path:
+
+**1. Single-user state, in-process.** The index cache, conversation store, and job registry
+(`backend/ragbot/api/state.py`) are plain Python objects keyed by `(repo_key, chunking, search_method)` /
+`conversation_id` / `job_id` — not module-level globals — held by one `AppState` per process. That keying
+is what makes the upgrade path a substitution rather than a rewrite: swap the dict-backed stores for
+Redis/Postgres behind the same three methods (`get_or_build_index`, `create`/`get`/`clear` conversations,
+`create`/`update` jobs), and the routes don't change. Today: one backend instance only, and conversations
+and jobs are lost on restart. What's missing for multi-user: those shared stores, plus auth and per-user
+scoping — right now any client can read any `repo_key`/`conversation_id`.
+
+**2. No Redis/RabbitMQ/Celery — jobs run via FastAPI `BackgroundTasks`.** Ingestion (download → chunk →
+embed → index) runs as a background task in the same process that served the `202`, with progress polled
+by the job registry and pushed to the client over SSE. That's two containers instead of four, and no
+broker to operate for a demo. Cost: a job dies if the process restarts mid-ingestion, it can't be retried
+or distributed across instances, and a big ingestion competes with request-serving CPU (mitigated by
+running the CPU-bound steps — chunking, embedding, index-fitting — through `anyio.to_thread.run_sync` so
+they don't block the event loop, but they still share the one process's resources). Upgrade path: RQ or
+Celery with workers, behind the same `JobRegistry` interface.
+
+**3. Gemini embeddings over the local model, as the new default.** `EMBEDDING_PROVIDER=google` replaces
+the previous `local` default. Payoff: no torch in the dependency tree — the backend image is ~400MB instead
+of the ~2.5GB `sentence-transformers` pulls in — and Gemini retrieves noticeably better on source code than
+the local model did. Cost, stated plainly: **every chunk of every ingested repo is sent to Google**, and
+indexing now needs network access and API spend instead of running fully offline. For private or
+air-gapped code this is the wrong default; `EMBEDDING_PROVIDER=local` (via
+`pip install '.[local-embeddings]'`) keeps everything on the machine, at the price of the larger image,
+slower CPU-bound indexing, and (per the retrieval-quality note below) weaker retrieval. Both providers stay
+fully supported — only the default changed.
 
 ---
 
@@ -145,9 +213,9 @@ instances rather than rebuilt per container.
 queue (SQS/Pub-Sub) with workers (ECS/Cloud Run Jobs), and make it incremental — re-embed only files whose
 content hash changed, driven by a webhook on push, instead of re-processing the repo.
 
-**Serving.** Containerize (a Dockerfile is a known gap), split the Streamlit UI from a stateless FastAPI
-backend, and put state in Redis/Postgres rather than `st.session_state` so any instance can serve any
-request. Autoscale on queue depth and request rate.
+**Serving.** Containerized and split already (see the trade-offs above) — the remaining step is putting
+state in Redis/Postgres behind the existing `AppState` interface, rather than in-process, so any backend
+instance can serve any request and autoscale on request rate.
 
 **Cost and safety.** The content-addressed embedding cache already exists and would port directly to a
 shared object store. Add query-level caching, per-user rate limits and token budgets. Keys move to Secrets
@@ -179,39 +247,45 @@ LLM_MODEL=openai:gpt-4.1-nano           # previous default
 | Local model (Ollama etc.) | No API spend and fully offline, but tool-calling reliability drops sharply, and this agent depends on it. |
 
 Because pydantic-ai takes provider-prefixed model strings, switching provider is a `.env` change rather
-than a code change — `src/LLM.py` owns the default and reports a missing credential **by name, before the
-first question** rather than failing mid-query. The same model backs the evaluation agent.
+than a code change — `backend/ragbot/core/LLM.py` owns the default and reports a missing credential **by
+name, before the first question** rather than failing mid-query. The same model backs the evaluation agent.
 
-**One trap worth recording**, since it only appears on the *second* message and so survives a quick smoke
-test: `asyncio.run()` closes its event loop on return, but the Google and OpenAI clients underneath
-pydantic-ai keep a persistent httpx connection pool bound to whichever loop first used it. A second
-`asyncio.run()` therefore dies with `RuntimeError: Event loop is closed` as the pool touches the dead loop.
-`src/AsyncRunner.py` keeps one loop alive on a dedicated thread for the process lifetime, which fixes it
-and lets connections be reused across turns. The CLI hit the same bug between its answer and `--evaluate`
-calls.
+**A trap worth recording, now resolved by the split**: `asyncio.run()` closes its event loop on return, but
+the Google and OpenAI clients underneath pydantic-ai keep a persistent httpx connection pool bound to
+whichever loop first used it — a second `asyncio.run()` in the same process died with `RuntimeError: Event
+loop is closed`. The original Streamlit app worked around this with a dedicated `AsyncRunner` thread. FastAPI
+already owns one long-lived event loop for the whole process, so that workaround is gone; `AgentWrapper.run`
+/ `run_stream` are just awaited directly by the route handlers. The CLI (`ragbot/cli.py`) now does the same
+thing with a single top-level `asyncio.run(async_main())` per invocation.
 
 > _Your take: why Gemini Flash over the OpenAI default, and whether latency, cost, or context drove it._
 
 ### Embedding model
 
-**Final choice:** pluggable, defaulting to local. Set in `.env`:
+**Final choice:** pluggable, defaulting to Gemini. Set in `.env`:
 
 ```
-EMBEDDING_PROVIDER=local     # default: free, offline, no API spend
-EMBEDDING_PROVIDER=openai    # text-embedding-3-small
-EMBEDDING_MODEL=...          # optional override for either provider
-EMBEDDING_CACHE=0            # optional: disable the on-disk vector cache
+EMBEDDING_PROVIDER=google        # default: gemini-embedding-2, needs GOOGLE_API_KEY
+EMBEDDING_PROVIDER=local         # free, offline, no key (pip install '.[local-embeddings]')
+EMBEDDING_PROVIDER=openai        # text-embedding-3-small
+EMBEDDING_MODEL=...              # optional override for whichever provider
+EMBEDDING_DIMENSIONS=768         # google only; 128-3072, default 768
+EMBEDDING_CACHE=0                # optional: disable the on-disk vector cache
 ```
 
 | Option | Trade-off |
 |---|---|
-| **local `multi-qa-distilbert-cos-v1`** (default) | Free, offline, no key needed. But trained for natural-language QA over prose, **not source code** — retrieval quality is the weakest link. |
-| **`text-embedding-3-small`** (supported) | Handles code well, ~$0.02/1M tokens (cents per repo). Needs network and API spend at index time. |
-| Local code-tuned model (e.g. jina-embeddings-v2-base-code) | Free *and* code-aware, but a large download and slow CPU embedding over a whole repo. Not wired up. |
+| **`gemini-embedding-2`** (default) | Retrieves noticeably better on code than the old local default, and needs no torch in the image (~400MB vs ~2.5GB). Needs `GOOGLE_API_KEY`, network at index time, and sends every chunk to Google. |
+| `text-embedding-3-small` (supported) | Also handles code well, ~$0.02/1M tokens. Needs `OPENAI_API_KEY` and network. |
+| local `multi-qa-distilbert-cos-v1` (supported, opt-in) | Free, offline, no key — the only fully air-gapped option. Trained for natural-language QA over prose, not source code, so it's the weakest of the three on retrieval quality; also the only one requiring `pip install '.[local-embeddings]'` (torch). |
 
-Both providers are implemented behind one `Embedder` interface, so switching is a one-line `.env` change.
-**Retrieval is noticeably better with `EMBEDDING_PROVIDER=openai`** — if you're assessing retrieval
-quality, switch it on; if you're just running it, local is fine.
+All three are implemented behind one `Embedder` interface, so switching is a one-line `.env` change. Gemini
+doesn't support the old `task_type` parameter for asymmetric query/document retrieval that some embedding
+APIs expose; instead, `GeminiEmbedder` prefixes queries and documents with a task description
+(`"task: search result | query: ..."` / `"... | document: ..."`), which maps directly onto the existing
+`encode()` contract — a bare `str` is a query, a `list` is corpus documents. The embedding-cache namespace
+includes the configured dimension (`google:gemini-embedding-2@768`), so changing `EMBEDDING_DIMENSIONS`
+can't silently mix vectors of two different shapes in one store.
 
 ### Vector database — and why there isn't one
 
@@ -249,15 +323,17 @@ hand.
 
 ### Persistence — a flat file, not a database
 
-Vectors are cached to `data/index/embeddings/<provider>_<model>/` as `vectors.npy` plus a `keys.json`
-mapping. Re-indexing a cached repo drops from **17.6s to effectively zero**, with identical results.
+Vectors are cached to `backend/data/index/embeddings/<provider>_<model>/` as `vectors.npy` plus a
+`keys.json` mapping. Re-indexing a cached repo drops from **17.6s to effectively zero**, with identical
+results.
 
 - **Content-addressed by `sha256(chunk_text)`, not keyed per repo.** The cache invalidates itself: edit one
   file and only its chunks are re-embedded (measured: 111 hits, 1 miss), and identical chunks — licence
   headers, boilerplate, empty `__init__.py` — are stored once, within and across repos. A per-repo snapshot
   would need an explicit cache-version constant and still go stale silently when the chunker changes.
-- **Namespaced per model.** Local vectors are 768-dim and OpenAI's are 1536-dim; mixing them would be
-  silent nonsense rather than a loud failure.
+- **Namespaced per model *and* dimension.** Gemini's default is 768-dim, OpenAI's is 1536-dim, and Gemini's
+  own dimension is itself configurable (`EMBEDDING_DIMENSIONS`) — mixing any of these would be silent
+  nonsense rather than a loud failure, so the dimension is part of the cache key, not just the model name.
 - **`.npy` with `allow_pickle=False`, not `minsearch.save()`.** Both `Index` and `VectorSearch` offer
   pickle-based persistence, but pickling a fitted scikit-learn vectoriser is version-fragile and executes
   arbitrary code on load — to save 0.03s of refitting.
@@ -272,7 +348,7 @@ writers are last-writer-wins — safe, but a simultaneous session's additions ca
 
 ### Orchestration framework
 
-**Final choice:** `pydantic-ai` (slim, OpenAI extra only).
+**Final choice:** `pydantic-ai` (slim, with the `openai` and `google` extras).
 
 | Option | Trade-off |
 |---|---|
@@ -342,18 +418,26 @@ growth. The allowlist bounds what can enter the index at all.
 
 `AgentLog.evaluate_log_record` runs an **LLM-as-judge** checklist over a logged run: instruction following,
 relevance, clarity, citations, completeness, whether search was actually called, and whether every claim is
-grounded in retrieved code. `main.py --evaluate` scores the answer you just got, and
+grounded in retrieved code. `python -m ragbot.cli --evaluate` scores the answer you just got, and
 `Prompts.QUESTION_GENERATION_PROMPT` generates test questions from the corpus to evaluate in bulk.
 
-**119 tests** cover chunking across six languages and its fallback paths, file selection, path-traversal
-rejection, RRF ordering, embedding-cache correctness (reuse, invalidation, model isolation, corruption
-recovery), model/credential resolution, event-loop reuse, and the metadata-preservation regressions.
+**189 tests total.** Backend (`backend/tests`, 155 tests, pytest): chunking across six languages and its
+fallback paths, file selection, path-traversal rejection, RRF ordering, embedding-cache correctness (reuse,
+invalidation, model isolation, corruption recovery, per-dimension namespacing), model/credential resolution,
+the Gemini embedding provider (query/document prefixes, batching, retries), the `agent.iter()`-based SSE
+event stream (tokens, tool calls, citations, done, history continuity), and the full FastAPI surface via
+`httpx.ASGITransport` — every route, the job lifecycle (`pending → running → succeeded`/`failed`), SSE
+framing, 404s, and path traversal through `/files/{path}`. Frontend (`frontend/src`, 34 tests, vitest):
+citation parsing (bare and markdown-link forms, including the piece with real logic — segmenting an answer
+into text/citation runs) and SSE frame parsing (multi-chunk reassembly, malformed input).
 
 ### Observability
 
-Every interaction is written to `logs/*.json` with the full message trace, model, tools, and system prompt —
-enough to replay or evaluate any answer after the fact. The UI reports ingestion stats (files per language,
-chunk count), warns past the ~5000-chunk comfort limit, and shows embedding-cache hits vs misses per index.
+Every interaction is written to `backend/logs/*.json` with the full message trace, model, tools, and system
+prompt — enough to replay or evaluate any answer after the fact. `GET /api/repos/{key}` reports ingestion
+stats (files per language, chunk count) computed once at ingest time, and the ingestion job's SSE stream
+reports named phases (`downloading → chunking → embedding → indexing → ready`) instead of an indeterminate
+spinner.
 
 > _Gap worth naming: there are no latency or token-spend metrics yet, and nothing aggregates the logs._
 
@@ -367,13 +451,14 @@ chunk count), warns past the ~5000-chunk comfort limit, and shows embedding-cach
 | Decision | Made | Your reasoning |
 |---|---|---|
 | Option 2 (Code Documentation Assistant) | | |
-| Streamlit + Python (no separate frontend) | | |
+| FastAPI + Next.js split (from a Streamlit monolith) | | |
 | tree-sitter AST chunking over simpler splitting | | |
-| Local embeddings by default, OpenAI opt-in | | |
+| Gemini embeddings by default, local/OpenAI opt-in | | |
 | minsearch + flat-file cache over a vector DB | | |
 | Three agent tools rather than one-shot retrieval | | |
 | pydantic-ai as orchestrator | | |
-| gpt-4.1-nano as default model | | |
+| Gemini 3.5 Flash as default chat model | | |
+| In-process state + `BackgroundTasks` over Redis/Celery | | |
 
 ---
 
@@ -381,26 +466,44 @@ chunk count), warns past the ~5000-chunk comfort limit, and shows embedding-cach
 
 **In place, and verifiable in the repo:**
 
-- 94 tests covering chunking, ingestion, retrieval fusion, the embedding cache, and both security guards
-- Separation of concerns — ingestion, chunking, embedding, retrieval, and agent each own one module
+- 189 tests (155 backend + 34 frontend) covering chunking, ingestion, retrieval fusion, the embedding
+  cache, path-traversal guards, the full FastAPI surface (every route, SSE framing, the job lifecycle), and
+  the frontend's citation/SSE parsing logic
+- `backend/Dockerfile` + `frontend/Dockerfile` + `docker-compose.yml`; `.github/workflows/ci.yml` runs both
+  test suites (backend pytest, frontend lint + typecheck + vitest + build) on every push/PR
+- Separation of concerns — ingestion, chunking, embedding, retrieval, agent, and now the API/state layer
+  each own one module; `backend/ragbot/core` has zero HTTP/FastAPI imports, so the CLI and the API share
+  the exact same pipeline
 - Strategy pattern for chunking and retrieval, so alternatives are swappable and comparable
 - Dependency injection (`Embedder`, `SearchStrategy` passed in) — which is what makes the tests fast and
-  network-free
-- Configuration via `.env` with a committed `.env.example`; no secrets in source
-- Security guards on all untrusted input (zip entries, agent-supplied paths), each with tests
-- Failure isolation — one unparseable file degrades to line windows instead of failing ingestion
+  network-free; the API tests fake the same seams (a fake `requests.get`, a fake embedder, a fake
+  `FunctionModel` chat model) rather than mocking framework internals
+- Configuration via `.env` with a committed `.env.example` per service; no secrets in source
+- Security guards on all untrusted input (zip entries, agent-supplied paths, the `/files/{path}` API route
+  reusing the same path-resolution helper as the agent tool), each with tests
+- Failure isolation — one unparseable file degrades to line windows instead of failing ingestion; a failed
+  ingestion job reports `status: "failed"` with the error rather than crashing the process
+- Keyed, not global, server-side state (index cache, conversation store, job registry) — an explicit
+  substitution path to Redis/Postgres, see the trade-offs in section b
 - Atomic writes for anything persisted
+- Full TypeScript strictness on the frontend (`tsc --noEmit` is part of CI); ESLint (`eslint-config-next`)
+  clean
 - Comments explain *why*, not *what*
 
 **Deliberately skipped, and why:**
 
-- **No Dockerfile** — the clearest gap against the brief.
-- **No CI pipeline** — tests run locally only.
-- **No type checking** (mypy/pyright) and only partial type hints.
-- **No linter/formatter config** (ruff/black) committed.
+- **No Python type checking** (mypy/pyright) and only partial type hints on the backend — the frontend is
+  fully typed, the backend isn't.
+- **No linter/formatter config** (ruff/black) committed for the backend.
 - **No structured logging or metrics** — JSON traces only.
-- **No integration test against a live LLM** — the agent loop is tested with pydantic-ai's `TestModel`, so
-  tool wiring is covered but answer quality isn't asserted automatically.
+- **No integration test against a live LLM** — the agent's streaming loop is tested against pydantic-ai's
+  `FunctionModel` (a fake that exercises the real `agent.iter()`/event-stream mechanics with no network),
+  so tool wiring and SSE framing are covered but answer *quality* isn't asserted automatically. A live
+  end-to-end smoke test was planned but blocked mid-build by hitting the Google Cloud project's spend cap.
+- **No production database** — see the single-user-state trade-off in section b; the substitution path
+  exists but isn't built.
+- **`docker compose up --build` is untested** — the Dockerfiles and compose file are written and reviewed
+  carefully, but this environment didn't have Docker installed to actually run them.
 
 > _Your take: which of these were conscious trade-offs for the time budget versus things you'd never ship
 > without, and what your normal bar looks like._
@@ -431,14 +534,17 @@ chunk count), warns past the ~5000-chunk comfort limit, and shows embedding-cach
 
 Technical backlog, roughly in the order I'd tackle it:
 
-1. Containerize (Dockerfile + compose) — the clearest gap against the brief.
-2. Benchmark Gemini 3.5 Flash against 3.7 Flash on the evaluation checklist before settling the default.
-3. Prune the embedding cache (LRU cap or a `--clear-cache` command); it currently grows unbounded.
-4. A fixed evaluation question set wired into CI, so retrieval changes are measured rather than eyeballed.
-5. Streaming responses, and surfacing retrieved sources in the UI alongside the answer.
+1. Actually run `docker compose up --build` end to end — written and reviewed, not yet verified, since this
+   environment had no Docker installed.
+2. Redis/Postgres behind `AppState`'s existing interface, so the backend can run more than one instance.
+3. Benchmark Gemini 3.5 Flash against 3.7 Flash on the evaluation checklist before settling the default.
+4. Prune the embedding cache (LRU cap or a `--clear-cache` command); it currently grows unbounded.
+5. A fixed evaluation question set wired into CI, so retrieval changes are measured rather than eyeballed —
+   the CI pipeline exists now, this just isn't in it yet.
 6. Re-ingest only files whose content hash changed (the embedding cache already makes this cheap;
    ingestion just doesn't check yet).
 7. A cross-file symbol graph, so "who calls this?" is answered by resolution rather than search.
+8. RQ/Celery workers behind the `JobRegistry` interface, so ingestion survives a backend restart.
 
 ---
 
@@ -446,11 +552,11 @@ Technical backlog, roughly in the order I'd tackle it:
 
 > Add screenshots to `docs/screenshots/` and link them here. Worth capturing:
 >
-> - The workflow controls with the pipeline complete (Repo ingested → Chunked → Indexed → Agent ready),
->   including the language breakdown and the embedding-cache hit/miss line
-> - A chat answer showing `path:line` citations with clickable GitHub links
-> - An answer where the agent used `read_file` or `list_files`, not just search
-> - The advanced settings expander (chunking / search / system prompt)
+> - The ingest dialog and its named-phase progress (`downloading → chunking → embedding → indexing → ready`)
+> - A chat answer with clickable `path:start-end` citation chips
+> - Clicking a citation opening the source viewer, scrolled to and highlighting the cited lines
+> - An answer where the agent's tool calls are visible as collapsible steps (`search_code`, `read_file`)
+> - The file tree, browsing the ingested repo directly
 > - Optionally a short screen recording of one end-to-end run
 
 ```
@@ -470,13 +576,22 @@ Technical backlog, roughly in the order I'd tackle it:
   no private repos, no incremental git clone.
 - **Ingestion is all-or-nothing.** Re-ingesting re-downloads and re-chunks everything; only the embeddings
   are reused.
-- **In-memory session state.** Chunks and the fitted indexes live in the Streamlit session, so restarting
-  rebuilds them — cheaply, since embeddings are cached. It also means the app is single-instance and can't
-  be horizontally scaled as-is.
+- **In-process, single-instance state.** The index cache, conversations, and jobs live in the backend
+  process's memory, so a restart loses conversations and in-flight jobs (rebuilding an index is cheap,
+  since embeddings are cached — see the trade-offs in section b). The backend can't run more than one
+  instance as-is.
 - **The embedding cache never shrinks**, and concurrent writers are last-writer-wins (safe, but a
   simultaneous session's additions can be lost).
 - **Binary and generated files are skipped entirely**, so questions about assets or build output can't be
   answered.
-- **Local embeddings are the weakest link** in retrieval quality — see the embedding section.
+- **Local embeddings (the `EMBEDDING_PROVIDER=local` opt-in) are the weakest link** in retrieval quality of
+  the three providers — see the embedding section. Gemini, the default, doesn't have this problem, at the
+  cost of sending code to Google.
 - **Gemini 3.5 Flash** is cheap and fast, but a larger model reasons better over multi-file questions.
   `LLM_MODEL` in `.env` switches it; 3.7 Flash is the newer, more agentic option and is untested here.
+- **Live end-to-end verification is incomplete.** The full pipeline was verified against the real Gemini
+  API for chat/embeddings during development, but the Google Cloud project hit its monthly spend cap
+  mid-session; everything since then (the FastAPI layer, the frontend, the SSE streaming contract) is
+  verified with fakes at every network/LLM boundary rather than a live run. `agent.iter()`'s streaming API
+  — the plan's highest-uncertainty item — was specifically confirmed against pydantic-ai 1.0.9 before the
+  cap was hit.
