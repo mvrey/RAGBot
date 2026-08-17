@@ -98,6 +98,16 @@ class Repository:
         )
 
 
+    @staticmethod
+    def repo_page_url(repo_url: str):
+        """The repo's browsable GitHub page - repo_url itself is the codeload
+        zip URL used to fetch it, which 404s if opened directly in a browser."""
+        match = CODELOAD_URL_RE.search(repo_url)
+        if not match:
+            return None
+        return f"https://github.com/{match.group('owner')}/{match.group('repo')}"
+
+
     @classmethod
     def list_cached_repos(cls, cache_dir: Path = REPO_CACHE_DIR):
         cache_dir = Path(cache_dir)
@@ -320,16 +330,24 @@ class Repository:
         chunk.setdefault('body', chunk.get('chunk', ''))
         chunk.setdefault('symbol', '')
         chunk.setdefault('kind', '')
+        chunk.setdefault('method', '')
         chunk.setdefault('start_line', None)
         chunk.setdefault('end_line', None)
-        for field in ('symbol', 'kind', 'filename', 'language'):
+        for field in ('symbol', 'kind', 'method', 'filename', 'language'):
             if chunk.get(field) is None:
                 chunk[field] = ''
         return chunk
 
 
     def _chunk_one(self, content, filename, doc, strategy, ChunkingStrategy):
-        """Chunk a single file according to the selected strategy."""
+        """Chunk a single file according to the selected strategy.
+
+        Tags every chunk with the concrete method actually used - under AUTO
+        that varies per file (markdown vs. code), so a chunk can't recover
+        which one ran from the repo-level strategy name alone. Matches
+        ChunkingStrategy's own member names, so the UI can reuse the same
+        name -> label mapping /api/config already returns.
+        """
         is_markdown = filename.lower().endswith(MARKDOWN_EXTENSIONS)
         language = doc.get('language') or CodeChunker.language_for(filename)
 
@@ -337,21 +355,26 @@ class Repository:
             # A repo holds both code and prose, so dispatch per file rather than
             # forcing one strategy across everything.
             if is_markdown:
-                return self._markdown_chunks(content, filename)
-            return self.code_chunker.chunk_file(content, filename, language)
+                chunks, method = self._markdown_chunks(content, filename), ChunkingStrategy.MARKDOWN.name
+            else:
+                chunks, method = self.code_chunker.chunk_file(content, filename, language), ChunkingStrategy.AST.name
+        elif strategy == ChunkingStrategy.AST:
+            chunks, method = self.code_chunker.chunk_file(content, filename, language), ChunkingStrategy.AST.name
+        elif strategy == ChunkingStrategy.MARKDOWN:
+            chunks, method = self._markdown_chunks(content, filename), ChunkingStrategy.MARKDOWN.name
+        elif strategy == ChunkingStrategy.PARAGRAPH:
+            chunks, method = self.text_chunker.chunk_by_paragraphs(content), ChunkingStrategy.PARAGRAPH.name
+        elif strategy == ChunkingStrategy.CHARACTER:
+            chunks, method = self.text_chunker.sliding_window(content, 2000, 1000), ChunkingStrategy.CHARACTER.name
+        elif strategy == ChunkingStrategy.LLM:
+            chunks = [{'chunk': s} for s in self.text_chunker.intelligent_chunking(content)]
+            method = ChunkingStrategy.LLM.name
+        else:
+            raise ValueError(f"Unsupported chunking strategy: {strategy}")
 
-        if strategy == ChunkingStrategy.AST:
-            return self.code_chunker.chunk_file(content, filename, language)
-        if strategy == ChunkingStrategy.MARKDOWN:
-            return self._markdown_chunks(content, filename)
-        if strategy == ChunkingStrategy.PARAGRAPH:
-            return self.text_chunker.chunk_by_paragraphs(content)
-        if strategy == ChunkingStrategy.CHARACTER:
-            return self.text_chunker.sliding_window(content, 2000, 1000)
-        if strategy == ChunkingStrategy.LLM:
-            return [{'chunk': s} for s in self.text_chunker.intelligent_chunking(content)]
-
-        raise ValueError(f"Unsupported chunking strategy: {strategy}")
+        for chunk in chunks:
+            chunk['method'] = method
+        return chunks
 
 
     def _markdown_chunks(self, content, filename):

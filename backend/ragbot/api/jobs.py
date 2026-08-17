@@ -132,6 +132,7 @@ async def _finish_ingest_job(
         search_method=search_method_name,
         chunk_count=len(chunks),
         language_stats=repository.language_stats(),
+        embedding_model=embedder.name,
         **extra_meta,
     )
 

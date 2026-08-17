@@ -3,11 +3,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { FolderGit2, Pencil, Plus, Trash2 } from 'lucide-react';
+import { FolderGit2, Info, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { RepoSummary } from '@/lib/types';
 import { IngestForm } from '@/components/IngestForm';
 import { RenameRepoDialog, type RenameTarget } from '@/components/RenameRepoDialog';
+import { RepoStatsDialog } from '@/components/RepoStatsDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -19,6 +20,7 @@ export default function HomePage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [repoToDelete, setRepoToDelete] = useState<RepoSummary | null>(null);
   const [repoToRename, setRepoToRename] = useState<RenameTarget | null>(null);
+  const [repoToInspect, setRepoToInspect] = useState<RepoSummary | null>(null);
   const { data: repos, isLoading } = useQuery({ queryKey: ['repos'], queryFn: api.listRepos });
 
   const openRepo = (repoKey: string) => {
@@ -80,6 +82,18 @@ export default function HomePage() {
                 <span className="truncate">{repo.display_name ?? repo.repo_key}</span>
               </CardTitle>
               <CardAction className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label={`View info for ${repo.repo_key}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRepoToInspect(repo);
+                  }}
+                >
+                  <Info className="size-4" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -157,6 +171,8 @@ export default function HomePage() {
           setRepoToRename(null);
         }}
       />
+
+      <RepoStatsDialog repo={repoToInspect} onClose={() => setRepoToInspect(null)} />
     </main>
   );
 }

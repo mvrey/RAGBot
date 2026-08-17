@@ -117,6 +117,38 @@ class TestChunking:
         assert 'function_definition' in kinds['app.py']
         assert 'section' in kinds['README.md']
 
+    def test_auto_tags_each_chunk_with_the_method_that_actually_ran(self, tmp_path):
+        repo = self._repo(tmp_path, {
+            "app.py": "def handler():\n    return 1\n",
+            "README.md": "# Title\n\n## Setup\n\nRun it.\n",
+        })
+
+        chunks = repo.chunk(ChunkingStrategy.AUTO)
+        methods = {c['filename']: {c2['method'] for c2 in chunks if c2['filename'] == c['filename']}
+                   for c in chunks}
+
+        assert methods['app.py'] == {'AST'}
+        assert methods['README.md'] == {'MARKDOWN'}
+
+    @pytest.mark.parametrize('strategy, expected_method', [
+        (ChunkingStrategy.AST, 'AST'),
+        (ChunkingStrategy.MARKDOWN, 'MARKDOWN'),
+        (ChunkingStrategy.PARAGRAPH, 'PARAGRAPH'),
+        (ChunkingStrategy.CHARACTER, 'CHARACTER'),
+    ])
+    def test_explicit_strategy_tags_every_chunk_with_itself(self, tmp_path, strategy, expected_method):
+        # Unlike AUTO, an explicit strategy applies uniformly - every chunk from
+        # every file should report that same method, whatever the file type.
+        repo = self._repo(tmp_path, {
+            "app.py": "def handler():\n    return 1\n",
+            "README.md": "# Title\n\nSome text here.\n",
+        })
+
+        chunks = repo.chunk(strategy)
+
+        assert chunks
+        assert all(c['method'] == expected_method for c in chunks)
+
     def test_every_chunk_keeps_its_filename(self, tmp_path):
         # Regression: paragraph/markdown chunkers used to drop parent metadata,
         # which silently broke citations.

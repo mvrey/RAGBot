@@ -14,6 +14,9 @@ from ragbot.core.SearchStrategy import SearchStrategyType
 from ragbot.core.settings import REPO_CACHE_DIR
 from ragbot.api.jobs import run_ingest_job, run_upload_ingest_job
 from ragbot.api.schemas import (
+    ChunkListResponse,
+    ChunkOut,
+    EmbeddingOut,
     FileContentResponse,
     FileNode,
     FileTreeResponse,
@@ -110,7 +113,7 @@ async def upload_repo(
     return IngestAccepted(job_id=job_id, repo_key=repo_key)
 
 
-def _to_repo_detail(meta: dict) -> RepoDetail:
+def _to_repo_detail(meta: dict, index_warm: bool = False) -> RepoDetail:
     return RepoDetail(
         repo_key=meta['repo_key'],
         repo_url=meta['repo_url'],
@@ -122,20 +125,24 @@ def _to_repo_detail(meta: dict) -> RepoDetail:
         language_stats=meta.get('language_stats', {}),
         chunking_strategy=meta.get('chunking_strategy'),
         search_method=meta.get('search_method'),
+        embedding_model=meta.get('embedding_model'),
+        index_warm=index_warm,
+        repo_page_url=Repository.repo_page_url(meta['repo_url']),
     )
 
 
 @router.get('/{repo_key}', response_model=RepoDetail)
-def get_repo(repo_key: str) -> RepoDetail:
+def get_repo(repo_key: str, state: AppState = Depends(get_state)) -> RepoDetail:
     meta = read_repo_meta(repo_key)
     if meta is None:
         raise HTTPException(404, f"No cached repo '{repo_key}'.")
 
-    return _to_repo_detail(meta)
+    index_warm = any(key[0] == repo_key for key in state.indexes)
+    return _to_repo_detail(meta, index_warm=index_warm)
 
 
 @router.patch('/{repo_key}', response_model=RepoDetail)
-def rename_repo(repo_key: str, payload: RenameRepoRequest) -> RepoDetail:
+def rename_repo(repo_key: str, payload: RenameRepoRequest, state: AppState = Depends(get_state)) -> RepoDetail:
     meta = read_repo_meta(repo_key)
     if meta is None:
         raise HTTPException(404, f"No cached repo '{repo_key}'.")
@@ -149,7 +156,24 @@ def rename_repo(repo_key: str, payload: RenameRepoRequest) -> RepoDetail:
     # label shown in the UI changes.
     update_repo_meta(REPO_CACHE_DIR / repo_key, display_name=display_name)
     meta['display_name'] = display_name
-    return _to_repo_detail(meta)
+    index_warm = any(key[0] == repo_key for key in state.indexes)
+    return _to_repo_detail(meta, index_warm=index_warm)
+
+
+def _rechunk_repo(repo_dir: Path, meta: dict) -> list:
+    """Re-derive this repo's chunks from its cached files.
+
+    Cheap (no network, no embedding) and deterministic given the same
+    chunking_strategy, so it's redone on demand rather than persisting the
+    chunk list itself - shared by the stats/chunk explorer routes and by
+    delete's cache eviction.
+    """
+    chunking_name = meta.get('chunking_strategy')
+    if not chunking_name:
+        raise HTTPException(409, "This repo hasn't finished indexing yet.")
+    repository = Repository(meta['repo_url'], repo_key=repo_dir.name)
+    repository.load_cached_repo_files()
+    return repository.chunk(ChunkingStrategy[chunking_name])
 
 
 def _evict_repo_embeddings(repo_dir: Path, meta: dict) -> None:
@@ -158,19 +182,63 @@ def _evict_repo_embeddings(repo_dir: Path, meta: dict) -> None:
     docstring. Best-effort: any failure here must not block the deletion
     itself, since a stale cache entry is a cost, not a correctness bug.
     """
-    chunking_name = meta.get('chunking_strategy')
-    if not chunking_name:
+    if not meta.get('chunking_strategy'):
         return
     try:
         embedder = get_embedder()
         if not isinstance(embedder, CachingEmbedder):
             return
-        repository = Repository(meta['repo_url'], repo_key=repo_dir.name)
-        repository.load_cached_repo_files()
-        chunks = repository.chunk(ChunkingStrategy[chunking_name])
+        chunks = _rechunk_repo(repo_dir, meta)
         embedder.evict_texts([c.get('chunk', '') for c in chunks])
     except Exception:
         pass
+
+
+@router.get('/{repo_key}/chunks', response_model=ChunkListResponse)
+def get_repo_chunks(repo_key: str) -> ChunkListResponse:
+    meta = read_repo_meta(repo_key)
+    if meta is None:
+        raise HTTPException(404, f"No cached repo '{repo_key}'.")
+
+    chunks = _rechunk_repo(REPO_CACHE_DIR / repo_key, meta)
+    return ChunkListResponse(
+        repo_key=repo_key,
+        chunks=[
+            ChunkOut(
+                filename=c.get('filename', ''),
+                kind=c.get('kind', ''),
+                method=c.get('method', ''),
+                language=c.get('language', ''),
+                symbol=c.get('symbol', ''),
+                start_line=c.get('start_line'),
+                end_line=c.get('end_line'),
+                chunk=c.get('chunk', ''),
+                hash=CachingEmbedder._hash(c.get('chunk', '')),
+            )
+            for c in chunks
+        ],
+    )
+
+
+@router.get('/{repo_key}/embeddings/{chunk_hash}', response_model=EmbeddingOut)
+def get_chunk_embedding(repo_key: str, chunk_hash: str) -> EmbeddingOut:
+    """Look up one chunk's cached vector by content hash - a pure on-disk cache
+    read, never a real embed call, so opening this view never spends money."""
+    meta = read_repo_meta(repo_key)
+    if meta is None:
+        raise HTTPException(404, f"No cached repo '{repo_key}'.")
+
+    embedder = get_embedder()
+    if not isinstance(embedder, CachingEmbedder):
+        return EmbeddingOut(hash=chunk_hash, model=getattr(embedder, 'name', None))
+
+    embedder._load()
+    row = embedder._index.get(chunk_hash)
+    if row is None:
+        return EmbeddingOut(hash=chunk_hash, model=embedder.name)
+
+    vector = embedder._vectors[row]
+    return EmbeddingOut(hash=chunk_hash, embedding=vector.tolist(), dimensions=len(vector), model=embedder.name)
 
 
 @router.delete('/{repo_key}', status_code=204)

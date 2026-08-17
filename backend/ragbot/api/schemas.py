@@ -58,10 +58,51 @@ class RepoDetail(RepoSummary):
     language_stats: dict[str, int] = Field(default_factory=dict)
     chunking_strategy: Optional[str] = None
     search_method: Optional[str] = None
+    # The model active at ingestion time - not necessarily today's EMBEDDING_MODEL
+    # if the env config changed since, so this is a record, not a live status.
+    embedding_model: Optional[str] = None
+    # Whether the built agent/index is currently sitting in the in-process LRU
+    # cache - if not, the next question pays a one-time rebuild-from-cache cost.
+    index_warm: bool = False
+    # The repo's browsable GitHub page - repo_url is the codeload zip URL used
+    # to fetch it, which 404s if a user opens it directly. None for a local upload.
+    repo_page_url: Optional[str] = None
 
 
 class RenameRepoRequest(BaseModel):
     display_name: str
+
+
+class ChunkOut(BaseModel):
+    filename: str
+    kind: str
+    # The concrete ChunkingStrategy member name actually used for this file
+    # (e.g. "AST" or "MARKDOWN") - meaningful per-chunk rather than per-repo
+    # because AUTO dispatches differently per file.
+    method: str
+    language: str
+    symbol: str
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+    chunk: str
+    # sha256 of `chunk` - the same key CachingEmbedder stores vectors under, so
+    # the UI can ask for one chunk's embedding without re-sending its full text.
+    hash: str
+
+
+class ChunkListResponse(BaseModel):
+    repo_key: str
+    chunks: list[ChunkOut]
+
+
+class EmbeddingOut(BaseModel):
+    hash: str
+    # None when this chunk was never embedded (e.g. the repo was indexed with
+    # TEXT-only search) or the cache entry was evicted - never triggers a real
+    # embed call just to answer this lookup.
+    embedding: Optional[list[float]] = None
+    dimensions: Optional[int] = None
+    model: Optional[str] = None
 
 
 class FileNode(BaseModel):

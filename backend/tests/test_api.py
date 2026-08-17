@@ -196,9 +196,120 @@ class TestIngestionLifecycle:
         assert body['language_stats']
         assert body['chunking_strategy'] == 'AUTO'
         assert body['search_method'] == 'TEXT'
+        assert body['embedding_model'] == FakeEmbedder.name
+
+    async def test_repo_page_url_is_the_browsable_page_not_the_zip(self, client):
+        await _ingest(client)
+
+        resp = await client.get(f'/api/repos/{REPO_KEY}')
+
+        assert resp.json()['repo_page_url'] == 'https://github.com/testowner/testrepo'
 
     async def test_unknown_repo_is_404(self, client):
         resp = await client.get('/api/repos/does-not-exist')
+        assert resp.status_code == 404
+
+    async def test_index_warm_reflects_the_in_memory_cache(self, client):
+        # TEXT search never builds a vector index, but the AgentWrapper index
+        # itself is still put in state.indexes at the end of every ingest.
+        await _ingest(client)
+
+        warm = (await client.get(f'/api/repos/{REPO_KEY}')).json()
+        assert warm['index_warm'] is True
+
+        # Ask a fresh AppState instance (a fresh `client` fixture would also do
+        # it, but reusing app.state.ragbot directly is more direct here).
+        app.state.ragbot = AppState()
+        cold = (await client.get(f'/api/repos/{REPO_KEY}')).json()
+        assert cold['index_warm'] is False
+
+
+class TestChunkExplorer:
+
+    async def test_lists_chunks_with_filename_kind_and_hash(self, client):
+        await _ingest(client)
+
+        resp = await client.get(f'/api/repos/{REPO_KEY}/chunks')
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body['repo_key'] == REPO_KEY
+        chunks = body['chunks']
+        assert chunks
+        assert {c['filename'] for c in chunks} == {'README.md', 'src/app.py'}
+        assert all(len(c['hash']) == 64 for c in chunks)
+        # app.py is AST-chunked under AUTO, so it carries a real tree-sitter kind.
+        assert any(c['kind'] for c in chunks if c['filename'] == 'src/app.py')
+
+    async def test_method_reflects_autos_per_file_dispatch(self, client):
+        # Under AUTO, markdown and code files are chunked differently - the
+        # per-chunk method must say which one actually ran for that file, not
+        # just echo the repo-level "AUTO" strategy name.
+        await _ingest(client)
+
+        chunks = (await client.get(f'/api/repos/{REPO_KEY}/chunks')).json()['chunks']
+
+        methods_by_file = {c['filename']: {ch['method'] for ch in chunks if ch['filename'] == c['filename']}
+                            for c in chunks}
+        assert methods_by_file['README.md'] == {'MARKDOWN'}
+        assert methods_by_file['src/app.py'] == {'AST'}
+
+    async def test_unknown_repo_chunks_is_404(self, client):
+        resp = await client.get('/api/repos/does-not-exist/chunks')
+        assert resp.status_code == 404
+
+    async def test_chunks_before_indexing_finishes_is_409(self, client):
+        # _write_meta() runs at extraction time, before chunking_strategy is
+        # ever set - simulate that in-between state directly on disk.
+        from ragbot.core.settings import REPO_CACHE_DIR
+        repo_dir = REPO_CACHE_DIR / 'partial_repo'
+        repo_dir.mkdir(parents=True)
+        (repo_dir / '_meta.json').write_text(
+            '{"repo_url": "local:partial", "downloaded_at": "now", "file_count": 0}', encoding='utf-8',
+        )
+
+        resp = await client.get('/api/repos/partial_repo/chunks')
+
+        assert resp.status_code == 409
+
+    async def test_embedding_lookup_returns_the_cached_vector(self, client, monkeypatch, tmp_path):
+        shared_cache = CachingEmbedder(FakeEmbedder(), cache_dir=tmp_path)
+        monkeypatch.setattr(jobs_module, 'get_embedder', lambda: shared_cache)
+        monkeypatch.setattr(repos_module, 'get_embedder', lambda: shared_cache)
+        await _ingest(client, search_method='VECTOR')
+        chunks = (await client.get(f'/api/repos/{REPO_KEY}/chunks')).json()['chunks']
+
+        resp = await client.get(f"/api/repos/{REPO_KEY}/embeddings/{chunks[0]['hash']}")
+
+        body = resp.json()
+        assert body['embedding'] is not None
+        assert body['dimensions'] == len(body['embedding']) == 8
+        assert body['model'] == FakeEmbedder.name
+
+    async def test_embedding_lookup_is_none_when_never_embedded(self, client, monkeypatch, tmp_path):
+        shared_cache = CachingEmbedder(FakeEmbedder(), cache_dir=tmp_path)
+        monkeypatch.setattr(jobs_module, 'get_embedder', lambda: shared_cache)
+        monkeypatch.setattr(repos_module, 'get_embedder', lambda: shared_cache)
+        # TEXT search never builds a vector index, so nothing gets embedded.
+        await _ingest(client, search_method='TEXT')
+        chunks = (await client.get(f'/api/repos/{REPO_KEY}/chunks')).json()['chunks']
+
+        resp = await client.get(f"/api/repos/{REPO_KEY}/embeddings/{chunks[0]['hash']}")
+
+        assert resp.json()['embedding'] is None
+
+    async def test_embedding_lookup_unknown_hash_is_none(self, client, monkeypatch, tmp_path):
+        shared_cache = CachingEmbedder(FakeEmbedder(), cache_dir=tmp_path)
+        monkeypatch.setattr(jobs_module, 'get_embedder', lambda: shared_cache)
+        monkeypatch.setattr(repos_module, 'get_embedder', lambda: shared_cache)
+        await _ingest(client, search_method='VECTOR')
+
+        resp = await client.get(f"/api/repos/{REPO_KEY}/embeddings/{'0' * 64}")
+
+        assert resp.json()['embedding'] is None
+
+    async def test_unknown_repo_embedding_lookup_is_404(self, client):
+        resp = await client.get(f"/api/repos/does-not-exist/embeddings/{'0' * 64}")
         assert resp.status_code == 404
 
 
