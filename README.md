@@ -1,6 +1,6 @@
-# RAGBot — Code Documentation Assistant
+# RAGBot - Code Documentation Assistant
 
-An LLM-powered RAG agent that ingests a GitHub repository — **source code and documentation** — and
+An LLM-powered RAG agent that ingests a code project (**source code and documentation**) and
 answers questions about it: how it works, where functionality lives, what the APIs and dependencies are.
 
 Built for **Option 2: Code Documentation Assistant**.
@@ -9,7 +9,7 @@ Built for **Option 2: Code Documentation Assistant**.
 |---|---|
 | a. Quick setup instructions | [a. Quick setup](#a-quick-setup) |
 | b. Architecture overview | [b. Architecture overview](#b-architecture-overview) |
-| c. Productionizing on a hyper-scaler | [c. Productionizing](#c-productionizing-on-a-hyper-scaler) |
+| c. Production on a hyper-scaler | [c. Production](#c-production-on-a-hyper-scaler) |
 | d. RAG/LLM approach & decisions | [d. RAG / LLM approach & decisions](#d-rag--llm-approach--decisions) |
 | e. Key technical decisions and why | [e. Key technical decisions](#e-key-technical-decisions-and-why) |
 | f. Engineering standards followed / skipped | [f. Engineering standards](#f-engineering-standards-followed-and-skipped) |
@@ -23,11 +23,13 @@ Also: [Known limitations](#known-limitations).
 
 ## a. Quick setup
 
-The app is a FastAPI backend + Next.js frontend, split into `backend/` and `frontend/`. **Requirements:**
-a **Google Gemini API key** ([get one here](https://aistudio.google.com/apikey)) — used for both the chat
-model and the default embedding provider.
+The app is a FastAPI backend + Next.js frontend, split into `backend/` and `frontend/`
 
-### Docker Compose (recommended — closest to how this would actually run)
+**Requirements:**
+
+* a **Google Gemini API key** used for both the chat model and the default embedding provider.
+
+### Docker Compose
 
 ```bash
 cp backend/.env.example backend/.env      # then edit backend/.env and add GOOGLE_API_KEY
@@ -41,7 +43,7 @@ docker compose up --build
 they survive a rebuild. The frontend's `NEXT_PUBLIC_API_URL` is baked in at **build** time (see the gotcha
 in section b), so if you change ports, rebuild rather than just restarting the container.
 
-### Running each half locally, without Docker
+### Running without Docker
 
 **Backend** (Python 3.13+):
 
@@ -66,7 +68,7 @@ cp .env.example .env.local                # NEXT_PUBLIC_API_URL=http://localhost
 npm run dev
 ```
 
-Open http://localhost:3000, ingest a repo, and chat. Or drive the backend directly:
+Open http://localhost:3000, ingest a repo or upload a codebase, and chat. Or drive the backend directly:
 
 ```bash
 curl -X POST localhost:8000/api/repos -H 'Content-Type: application/json' \
@@ -95,28 +97,8 @@ cd frontend && npm test                   # 34 tests (vitest)
 
 ## b. Architecture overview
 
-```
-                    ┌─────────────────────────── backend (FastAPI) ───────────────────────────┐
-                    │                                                                          │
-GitHub zip ──► Repository ──► chunkers ──► SearchStrategy ──► AgentWrapper ──► SSE (tokens,     │
-                    │              │              │                 │          tool calls,     │──► Next.js
-               data/repos/     minsearch      data/index/       pydantic-ai    citations, done) │    frontend
-             (source mirror) (TF-IDF+vectors) (embedding cache) (3 tools, Gemini)                │    (chat +
-                    │                                                │                          │   source
-                    └──────────────────── read_file / list_files ────┘                          │   viewer)
-                    │                                                                            │
-              index cache · job registry · conversation store  (in-process, keyed, LRU-capped)   │
-                    │                                                                            │
-                    └────────────────────────────── logs/*.json ───────────────────────────────┘
-                                                (+ LLM-as-judge eval)
-```
+SEE docs/architecture.jpg
 
-`backend/data/repos/` is a faithful mirror of the repository; `backend/data/index/` holds derived
-artefacts. They are kept apart deliberately — ingestion and the agent's `list_files` both walk the repo
-tree, and would otherwise pick up cache files as source code. Both are env-driven (`RAGBOT_DATA_DIR`,
-`RAGBOT_LOG_DIR`) so a container can point them at a mounted volume instead of the package's on-disk
-location. Everything below `ragbot/core/` is UI-agnostic — the FastAPI layer is the only thing that knows
-about HTTP, and the CLI (`ragbot/cli.py`) exercises the exact same pipeline for one-off questions.
 
 | Module | Responsibility |
 |---|---|
@@ -143,7 +125,7 @@ about HTTP, and the CLI (`ragbot/cli.py`) exercises the exact same pipeline for 
 | `frontend/src/components/ChatPanel.tsx` | Streams an answer; renders tool calls as collapsible steps |
 | `frontend/src/components/SourceViewer.tsx` | Opens a cited file, syntax-highlighted, scrolled to and highlighting the cited lines |
 
-**Ingestion.** The repo zip is fetched once and every file worth indexing is written to
+**Ingestion.** The repo zip is fetched once and every file is written to
 `backend/data/repos/<owner>_<repo>_<branch>/`. That cache is what makes `read_file`, `list_files`, and the
 API's file-tree/file-content endpoints possible, and it means re-runs don't re-download. Zip entries are
 untrusted input, so paths are resolved and checked against the cache root before writing (zip-slip guard);
@@ -155,8 +137,8 @@ one missing entry away from feeding a binary to the indexer; an allowlist fails 
 Vendored and generated directories (`node_modules`, `.venv`, `dist`, `target`, …), lockfiles, minified
 bundles, and files over 200 KB are excluded.
 
-**Retrieval.** Every chunk is indexed twice — TF-IDF over `chunk`/`symbol`/`filename`, and dense vectors —
-and hybrid mode fuses the two ranked lists with reciprocal rank fusion.
+**Retrieval.** Every chunk is indexed twice: keyword search over `chunk`/`symbol`/`filename` (lexical), and dense vectors (semantical).
+Hybrid mode fuses the two ranked lists with reciprocal rank fusion.
 
 **The agent** gets three tools, because one-shot similarity search answers "what does X do" but not
 "where is X implemented":
@@ -167,58 +149,51 @@ and hybrid mode fuses the two ranked lists with reciprocal rank fusion.
 
 ### Trade-offs made splitting into backend + frontend
 
-Three decisions were made explicitly for a single-instance demo, each with a stated upgrade path:
+Three decisions were made explicitly for a simpler single-instance demo, each with a stated upgrade path:
 
 **1. Single-user state, in-process.** The index cache, conversation store, and job registry
 (`backend/ragbot/api/state.py`) are plain Python objects keyed by `(repo_key, chunking, search_method)` /
-`conversation_id` / `job_id` — not module-level globals — held by one `AppState` per process. That keying
-is what makes the upgrade path a substitution rather than a rewrite: swap the dict-backed stores for
-Redis/Postgres behind the same three methods (`get_or_build_index`, `create`/`get`/`clear` conversations,
-`create`/`update` jobs), and the routes don't change. Today: one backend instance only, and conversations
-and jobs are lost on restart. What's missing for multi-user: those shared stores, plus auth and per-user
-scoping — right now any client can read any `repo_key`/`conversation_id`.
+`conversation_id` / `job_id` held by one `AppState` per process.
+Today: one backend instance only, and conversations and jobs are lost on restart. 
+What's missing for multi-user: those shared stores, plus auth and per-user
+scoping: right now any client can read any `repo_key`/`conversation_id`.
 
 **2. No Redis/RabbitMQ/Celery — jobs run via FastAPI `BackgroundTasks`.** Ingestion (download → chunk →
-embed → index) runs as a background task in the same process that served the `202`, with progress polled
-by the job registry and pushed to the client over SSE. That's two containers instead of four, and no
-broker to operate for a demo. Cost: a job dies if the process restarts mid-ingestion, it can't be retried
-or distributed across instances, and a big ingestion competes with request-serving CPU (mitigated by
-running the CPU-bound steps — chunking, embedding, index-fitting — through `anyio.to_thread.run_sync` so
-they don't block the event loop, but they still share the one process's resources). Upgrade path: RQ or
-Celery with workers, behind the same `JobRegistry` interface.
+embed → index) runs as a background task in the same process, with progress polled
+by the job registry and pushed to the client. That's two containers instead of four (Redis+RabbitMQ), and no
+broker to operate for a demo. 
+Cost: a job dies if the process restarts mid-ingestion, it can't be retried
+or distributed across instances, and a big ingestion competes with request-serving CPU (although they run on different threads). 
+Upgrade path: RQ or Celery with workers, behind the same `JobRegistry` interface.
 
-**3. Gemini embeddings over the local model, as the new default.** `EMBEDDING_PROVIDER=google` replaces
-the previous `local` default. Payoff: no torch in the dependency tree — the backend image is ~400MB instead
-of the ~2.5GB `sentence-transformers` pulls in — and Gemini retrieves noticeably better on source code than
-the local model did. Cost, stated plainly: **every chunk of every ingested repo is sent to Google**, and
+**3. Gemini embeddings over the local model by default.** `EMBEDDING_PROVIDER=google` instead of `local`. 
+Payoff: no torch in the dependency tree — the backend image is ~400MB instead
+of the ~2.5GB `sentence-transformers` pulls in. 
+Cost: **every chunk of every ingested repo is sent to Google**, and
 indexing now needs network access and API spend instead of running fully offline. For private or
-air-gapped code this is the wrong default; `EMBEDDING_PROVIDER=local` (via
-`pip install '.[local-embeddings]'`) keeps everything on the machine, at the price of the larger image,
-slower CPU-bound indexing, and (per the retrieval-quality note below) weaker retrieval. Both providers stay
-fully supported — only the default changed.
+air-gapped code this is the wrong default;
 
 ---
 
-## c. Productionizing on a hyper-scaler
+## c. Production on a hyper-scaler
 
 What this would need to run as a real service:
 
-**Storage and retrieval.** Replace minsearch with a managed vector database — pgvector on RDS/Cloud SQL if
-Postgres is already in the stack, or Pinecone/Qdrant/Vertex AI Vector Search otherwise — with an ANN index
-so query latency stops scaling linearly with corpus size. Keep the keyword half in OpenSearch and fuse as
-now. Move the repo cache and the embedding cache from local disk to S3/GCS so they're shared across
+**Storage and retrieval.** Replace minsearch (local embeddings) with a managed vector database: pgvector on RDS/Cloud SQL if
+Postgres is already in the stack, or Pinecone/Qdrant/Vertex AI Vector Search otherwise, with an Nearest Neighbour index
+for scaling performance.
+Move the repo cache and the embedding cache from local disk to S3/GCS so they're shared across
 instances rather than rebuilt per container.
 
 **Ingestion as a job.** Indexing a large repo takes minutes; it doesn't belong in a request. Push it to a
-queue (SQS/Pub-Sub) with workers (ECS/Cloud Run Jobs), and make it incremental — re-embed only files whose
+queue with workers (ECS/Cloud Run Jobs), and make it incremental. Re-embed only files whose
 content hash changed, driven by a webhook on push, instead of re-processing the repo.
 
-**Serving.** Containerized and split already (see the trade-offs above) — the remaining step is putting
+**Serving.** Containerized and split already. The remaining step is putting
 state in Redis/Postgres behind the existing `AppState` interface, rather than in-process, so any backend
 instance can serve any request and autoscale on request rate.
 
-**Cost and safety.** The content-addressed embedding cache already exists and would port directly to a
-shared object store. Add query-level caching, per-user rate limits and token budgets. Keys move to Secrets
+**Cost and safety.** Add query-level caching, per-user rate limits and token budgets. Keys move to Secrets
 Manager. Add input validation on repo URLs and a repository size ceiling.
 
 **Observability.** The JSON logs become structured traces (OpenTelemetry → Datadog/Cloud Trace), with
@@ -231,34 +206,20 @@ LLM-as-judge checklist against a fixed question set in CI and alert on regressio
 
 ### LLM selection
 
-**Final choice:** `google-gla:gemini-3.5-flash`, via pydantic-ai. Configurable in `.env`:
+Gemini provides ample free tier requests to make this project work without token cost ramping up.
 
-```
-LLM_MODEL=google-gla:gemini-3.5-flash   # default
-LLM_MODEL=google-gla:gemini-3.7-flash   # newest Flash, tuned for agentic/coding work
-LLM_MODEL=openai:gpt-4.1-nano           # previous default
-```
+**Final choice:** `google-gla:gemini-2.5-flash`, via pydantic-ai. Configurable in `.env`:
 
 | Option | Trade-off |
 |---|---|
-| **Gemini 3.5 Flash** (chosen) | Fast and cheap, with a large context window that suits reading several source files in one turn. Requires a `GOOGLE_API_KEY`. |
-| Gemini 3.7 Flash | Google positions it explicitly for "complex coding, agentic workflows, and reliable multi-step execution" — the closest fit to this use case. One line to switch, and worth benchmarking against 3.5. |
-| gpt-4.1-nano (previous) | Cheapest of the 4.1 family and reliable at tool calling, but weaker at reasoning across several files. |
-| Local model (Ollama etc.) | No API spend and fully offline, but tool-calling reliability drops sharply, and this agent depends on it. |
+| **Gemini 2.5 Flash** (chosen) | Fast and realtively cheap, with a large context window that suits reading several source files in one turn. Requires a `GOOGLE_API_KEY`. |
+| gemini-2.5-flash-lite | Cheapest of the 4.1 family and reliable at tool calling, but weaker at reasoning across several files. |
+| Local model (Ollama etc.) | No API spend and fully offline, but project complexity scales out of bounds and tool-calling reliability drops sharply, and this agent depends on it. |
 
 Because pydantic-ai takes provider-prefixed model strings, switching provider is a `.env` change rather
 than a code change — `backend/ragbot/core/LLM.py` owns the default and reports a missing credential **by
 name, before the first question** rather than failing mid-query. The same model backs the evaluation agent.
 
-**A trap worth recording, now resolved by the split**: `asyncio.run()` closes its event loop on return, but
-the Google and OpenAI clients underneath pydantic-ai keep a persistent httpx connection pool bound to
-whichever loop first used it — a second `asyncio.run()` in the same process died with `RuntimeError: Event
-loop is closed`. The original Streamlit app worked around this with a dedicated `AsyncRunner` thread. FastAPI
-already owns one long-lived event loop for the whole process, so that workaround is gone; `AgentWrapper.run`
-/ `run_stream` are just awaited directly by the route handlers. The CLI (`ragbot/cli.py`) now does the same
-thing with a single top-level `asyncio.run(async_main())` per invocation.
-
-> _Your take: why Gemini Flash over the OpenAI default, and whether latency, cost, or context drove it._
 
 ### Embedding model
 

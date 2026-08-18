@@ -1,0 +1,191 @@
+<mxfile host="app.diagrams.net" agent="Claude Code">
+  <diagram name="RAGBot Architecture" id="ragbot-architecture">
+    <mxGraphModel dx="2758" dy="1339" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;fontSize=22;fontStyle=1;align=left;verticalAlign=middle;" value="RAGBot — Architecture" vertex="1">
+          <mxGeometry height="40" width="500" x="-100" y="-40" as="geometry" />
+        </mxCell>
+        <mxCell id="backend_box" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F7FA;strokeColor=#647687;verticalAlign=top;align=center;fontSize=16;fontStyle=1;spacingLeft=12;spacingTop=8;" value="&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;Backend — FastAPI&lt;/span&gt;" vertex="1">
+          <mxGeometry height="800" width="1160" x="220" y="-150" as="geometry" />
+        </mxCell>
+        <mxCell id="frontend_box" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F7FA;strokeColor=#647687;verticalAlign=top;align=center;fontSize=16;fontStyle=1;spacingLeft=12;spacingTop=8;" value="Frontend — Next.js" vertex="1">
+          <mxGeometry height="800" width="300" x="1560" y="-150" as="geometry" />
+        </mxCell>
+        <mxCell id="github" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontSize=12;" value="GitHub&lt;br&gt;(codeload zip)" vertex="1">
+          <mxGeometry height="70" width="180" x="-100" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="local" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontSize=12;" value="User&#39;s local folder&lt;br&gt;(zipped client-side in the browser)" vertex="1">
+          <mxGeometry height="70" width="180" x="-100" y="155" as="geometry" />
+        </mxCell>
+        <mxCell id="embedapi" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontSize=12;" value="Embedding API / model&lt;br&gt;Gemini · OpenAI · local (sentence-transformers)" vertex="1">
+          <mxGeometry height="70" width="210" x="700" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="chatmodel" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontSize=12;" value="LLM chat model&lt;br&gt;(gemini-flash)" vertex="1">
+          <mxGeometry height="70" width="210" x="1140" y="-40" as="geometry" />
+        </mxCell>
+        <mxCell id="repo" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=12;" value="Repository&lt;br&gt;ingest + on-disk mirror&lt;br&gt;(GitHub zip or local upload)" vertex="1">
+          <mxGeometry height="90" width="180" x="260" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="chunk" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=12;" value="Chunkers&lt;br&gt;AST · Markdown · Paragraph&lt;br&gt;Character · LLM (AUTO dispatches per file)" vertex="1">
+          <mxGeometry height="90" width="190" x="480" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="search" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=12;" value="SearchStrategy&lt;br&gt;TEXT (minsearch TF-IDF)&lt;br&gt;VECTOR · HYBRID (RRF fusion)" vertex="1">
+          <mxGeometry height="90" width="190" x="710" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="agent" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=12;" value="AgentWrapper&lt;br&gt;pydantic-ai agent&lt;br&gt;tools: search_code, read_file, list_files" vertex="1">
+          <mxGeometry height="90" width="210" x="940" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="cache" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=12;" value="CachingEmbedder&lt;br&gt;sha256(chunk text) → vector&lt;br&gt;(skips re-embedding unchanged chunks)" vertex="1">
+          <mxGeometry height="80" width="190" x="710" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="log" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=12;" value="AgentLog&lt;br&gt;logs every chat turn (CLI + API)" vertex="1">
+          <mxGeometry height="60" width="210" x="940" y="305" as="geometry" />
+        </mxCell>
+        <mxCell id="embedder" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=12;" value="Embedder&lt;br&gt;Gemini · OpenAI · Local" vertex="1">
+          <mxGeometry height="60" width="190" x="710" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="state" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=12;" value="AppState (in-process, single worker)&lt;br&gt;index LRU cache · job registry · conversation store" vertex="1">
+          <mxGeometry height="70" width="430" x="260" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="data_repos" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=12;boundedLbl=1;" value="data/repos/&lt;br&gt;source mirror + _meta.json" vertex="1">
+          <mxGeometry height="80" width="190" x="705" y="-60" as="geometry" />
+        </mxCell>
+        <mxCell id="data_index" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=12;boundedLbl=1;" value="data/index/embeddings/&lt;br&gt;vectors.npy + keys.json, per model" vertex="1">
+          <mxGeometry height="80" width="190" x="380" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="logs_dir" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=12;boundedLbl=1;" value="logs/*.json&lt;br&gt;interaction log + LLM-as-judge eval" vertex="1">
+          <mxGeometry height="80" width="210" x="940" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="home" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=12;" value="Home page&lt;br&gt;repo list · ingest / upload&lt;br&gt;rename · delete · stats lightbox" vertex="1">
+          <mxGeometry height="100" width="260" x="1580" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="workspace" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=12;" value="Repo workspace&lt;br&gt;Chat panel + File tree + Source viewer" vertex="1">
+          <mxGeometry height="100" width="260" x="1580" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="github" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" target="repo" value="zip download">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="local" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" target="repo" value="zip upload">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="repo" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" target="data_repos" value="mirrors to disk">
+          <mxGeometry relative="1" x="0.5385" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="350" y="-20" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="repo" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" target="chunk" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="chunk" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" target="search" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="search" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" target="cache" value="VECTOR / HYBRID">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="cache" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" target="embedder" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="cache" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=52.5;entryPerimeter=0;" target="data_index" value="persists vectors">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="670" y="260" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="embedder" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=11;" target="embedapi" value="cache miss only">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="chunk" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" target="agent" value="chunks (context)">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="575.03" y="50.03" />
+              <mxPoint x="992.48" y="50.03" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="search" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" target="agent" value="&lt;div&gt;&lt;br&gt;&lt;/div&gt;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=11;entryX=1;entryY=0.5;entryDx=0;entryDy=0;entryPerimeter=0;" target="data_repos" value="read_file / list_files">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1045" y="-20" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e13" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="chatmodel" value="">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1045" y="-5" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e14" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" target="log" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" edge="1" parent="1" source="log" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" target="logs_dir" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" edge="1" parent="1" source="state" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=11;" target="repo" value="job registry (progress)">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="320" y="240" />
+              <mxPoint x="320" y="240" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e17" edge="1" parent="1" source="state" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;fontSize=11;entryX=0.75;entryY=1;entryDx=0;entryDy=0;exitX=1.004;exitY=0.431;exitDx=0;exitDy=0;exitPerimeter=0;" target="agent" value="conversation store">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1180" y="540.17" />
+              <mxPoint x="1180" y="240.03" />
+              <mxPoint x="1097.52" y="240.03" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e18" edge="1" parent="1" source="home" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;entryX=0.8;entryY=0.028;entryDx=0;entryDy=0;entryPerimeter=0;dashed=1;" target="repo" value="REST: ingest / upload / list / rename / delete / chunks">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1710" y="-80" />
+              <mxPoint x="404" y="-80" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e19" edge="1" parent="1" source="workspace" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;exitX=0.25;exitY=0;exitDx=0;exitDy=0;" target="agent" value="REST: POST message">
+          <mxGeometry relative="1" x="0.1519" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1645.03" y="360.03" />
+              <mxPoint x="1480" y="360.03" />
+              <mxPoint x="1480" y="135" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e20" edge="1" parent="1" source="state" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#82B366;exitX=1;exitY=0.75;exitDx=0;exitDy=0;" target="home" value="SSE: job progress (phase, X/Y)">
+          <mxGeometry relative="1" x="-0.2825" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1890" y="562.47" />
+              <mxPoint x="1890" y="140" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e21" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#82B366;exitX=1;exitY=0.75;exitDx=0;exitDy=0;" target="workspace" value="SSE: tokens · tool_call · tool_result · citation · done">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="1290" y="157.48" />
+              <mxPoint x="1290" y="230.03" />
+              <mxPoint x="1770" y="230.03" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
