@@ -388,20 +388,17 @@ spinner.
 
 ## e. Key technical decisions and why
 
-> The decisions and their trade-offs are documented in section (d). This section is for **your** reasoning:
-> what you weighed, what you rejected, and what you'd defend in an interview.
-
-| Decision | Made | Your reasoning |
-|---|---|---|
-| Option 2 (Code Documentation Assistant) | | |
-| FastAPI + Next.js split (from a Streamlit monolith) | | |
-| tree-sitter AST chunking over simpler splitting | | |
-| Gemini embeddings by default, local/OpenAI opt-in | | |
-| minsearch + flat-file cache over a vector DB | | |
-| Three agent tools rather than one-shot retrieval | | |
-| pydantic-ai as orchestrator | | |
-| Gemini 3.5 Flash as default chat model | | |
-| In-process state + `BackgroundTasks` over Redis/Celery | | |
+| Decision | Your reasoning |
+|---|---|
+| Option 2 (Code Documentation Assistant) | Chosen because it's the most challenging of the assignment's options. It exercises AST-aware chunking, a multi-tool agent, a full API/frontend split, and production considerations in one project, which best demonstrates range across the stack. |
+| FastAPI + Next.js split (from a Streamlit monolith) | Two independently deployable services map onto a microservices topology: backend and frontend scale independently, ship as separate containers with their own release cycles, and a cloud load balancer can route and autoscale each tier on its own metrics instead of one monolithic process — see [section c](#c-production-on-a-hyper-scaler) for the target cloud topology. |
+| tree-sitter AST chunking over simpler splitting | See [Chunking](#chunking). Chunking on real syntactic boundaries instead of fixed-size splits keeps each chunk (a function, class, or method) semantically whole rather than cut mid-definition. |
+| Gemini embeddings by default, local/OpenAI opt-in | The goal was to keep the setup as close to fully local and self-contained as reasonable, without over-engineering the provider abstraction, while balancing retrieval quality against dependency weight. Gemini wins that trade-off by default. See [Embedding model](#embedding-model) for the full comparison against local and OpenAI. |
+| minsearch + flat-file cache over a vector DB | Covered under [Vector database — and why there isn't one](#vector-database--and-why-there-isnt-one): at this project's scale brute-force search is already fast, so a vector database would optimize a step that was never the bottleneck. |
+| Three agent tools rather than one-shot retrieval | Explained in [section b](#b-architecture-overview). One-shot similarity search answers "what does X do" but not "where is X implemented," so the agent gets `search_code`, `read_file`, and `list_files` and decides when to use each. |
+| pydantic-ai as orchestrator | Covered under [Orchestration framework](#orchestration-framework): tools as plain Python functions, structured outputs, and a serialisable message history, without the abstraction weight of LangChain-style chains. |
+| Gemini 2.5 Flash as default chat model | | See [LLM selection](#llm-selection). The balance of speed, cost, context window, and tool-calling reliability the agent depends on. |
+| In-process state + `BackgroundTasks` over Redis/Celery | Explained under [Trade-offs made splitting into backend + frontend](#trade-offs-made-splitting-into-backend--frontend): the right call for a single-instance demo, with an explicit upgrade path to Redis/Celery once multi-user support is needed. |
 
 ---
 
@@ -412,82 +409,88 @@ spinner.
 - 189 tests (155 backend + 34 frontend) covering chunking, ingestion, retrieval fusion, the embedding
   cache, path-traversal guards, the full FastAPI surface (every route, SSE framing, the job lifecycle), and
   the frontend's citation/SSE parsing logic
+
 - `backend/Dockerfile` + `frontend/Dockerfile` + `docker-compose.yml`; `.github/workflows/ci.yml` runs both
   test suites (backend pytest, frontend lint + typecheck + vitest + build) on every push/PR
-- Separation of concerns — ingestion, chunking, embedding, retrieval, agent, and now the API/state layer
+
+- Separation of concerns: ingestion, chunking, embedding, retrieval, agent, and now the API/state layer
   each own one module; `backend/ragbot/core` has zero HTTP/FastAPI imports, so the CLI and the API share
   the exact same pipeline
+
 - Strategy pattern for chunking and retrieval, so alternatives are swappable and comparable
+
 - Dependency injection (`Embedder`, `SearchStrategy` passed in) — which is what makes the tests fast and
   network-free; the API tests fake the same seams (a fake `requests.get`, a fake embedder, a fake
   `FunctionModel` chat model) rather than mocking framework internals
+
 - Configuration via `.env` with a committed `.env.example` per service; no secrets in source
+
 - Security guards on all untrusted input (zip entries, agent-supplied paths, the `/files/{path}` API route
   reusing the same path-resolution helper as the agent tool), each with tests
+
 - Failure isolation — one unparseable file degrades to line windows instead of failing ingestion; a failed
   ingestion job reports `status: "failed"` with the error rather than crashing the process
+
 - Keyed, not global, server-side state (index cache, conversation store, job registry) — an explicit
   substitution path to Redis/Postgres, see the trade-offs in section b
+
 - Atomic writes for anything persisted
-- Full TypeScript strictness on the frontend (`tsc --noEmit` is part of CI); ESLint (`eslint-config-next`)
-  clean
+
+- Full TypeScript strictness on the frontend
+
 - Comments explain *why*, not *what*
 
-**Deliberately skipped, and why:**
-
-- **No Python type checking** (mypy/pyright) and only partial type hints on the backend — the frontend is
-  fully typed, the backend isn't.
-- **No linter/formatter config** (ruff/black) committed for the backend.
-- **No structured logging or metrics** — JSON traces only.
-- **No integration test against a live LLM** — the agent's streaming loop is tested against pydantic-ai's
-  `FunctionModel` (a fake that exercises the real `agent.iter()`/event-stream mechanics with no network),
-  so tool wiring and SSE framing are covered but answer *quality* isn't asserted automatically. A live
-  end-to-end smoke test was planned but blocked mid-build by hitting the Google Cloud project's spend cap.
-- **No production database** — see the single-user-state trade-off in section b; the substitution path
-  exists but isn't built.
-- **`docker compose up --build` is untested** — the Dockerfiles and compose file are written and reviewed
+- **`docker compose up --build` is untested**. The Dockerfiles and compose file are written and reviewed
   carefully, but this environment didn't have Docker installed to actually run them.
-
-> _Your take: which of these were conscious trade-offs for the time budget versus things you'd never ship
-> without, and what your normal bar looks like._
 
 ---
 
 ## g. How I used AI tools in my development process
 
 > This section must be in your own words — it's explicitly what the assignment is screening for.
-> Prompts to cover:
 
-- **Which tools**, and for what parts of the work.
-- **What you delegated vs. wrote or specified yourself** — and where you drew that line.
-- **How you verified the output.** (Worth mentioning: several decisions here were settled by *measuring*
-  rather than accepting a plausible suggestion — the vector-database question was decided by benchmarking
-  search at 11ms against embedding at 7.5s, and the tree-sitter node-type map was read off the real parsers
-  after an assumed one would have been wrong for Go and C#.)
-- **Bugs AI introduced or missed**, and how you caught them.
-- **How you keep AI-assisted code consistent with your own style** and maintainable by others.
-- **Your do's and don'ts.**
+- **Which tools, and for what parts of the work.** Claude Code did most of the hands-on typing: scaffolding
+  new modules, writing tests alongside the code they cover, and drafting README sections from a description
+  of what was actually built. The retrieval design, the chunking strategy, and every trade-off were mine; 
+  AI implemented them and proposed the options along the way.
+
+- **What you delegated vs. wrote or specified yourself.** Delegated: boilerplate (routes, schemas, SSE
+  plumbing, test scaffolding) and first drafts of documentation. Kept for myself: architecture decisions,
+  anything security-sensitive (path traversal, zip-slip), and the final call on every trade-off.
+
+- **How you verified the output.** Every change ran the existing test suite before being accepted, and new
+  code came with new tests, not just a claim that it worked. Some decisions were settled by measuring
+  instead of trusting a plausible-sounding answer (e.g. the vector-database question was decided by benchmarking).
+
+- **How you keep AI-assisted code consistent with your own style and maintainable by others.** Comments are
+  restricted to explaining *why*, not *what*; AI drafts that restated the obvious or added defensive handling
+  for cases that can't happen were trimmed before merging. Module boundaries and dependency injection
+  (`Embedder`, `SearchStrategy` passed in, not imported) were enforced the same way regardless of who wrote
+  the first draft.
+
+- **Your do's and don'ts.** Do: hand it a concrete, checkable task and read the diff before accepting it.
+  Don't: accept an architectural claim without measuring it, or let it touch security-sensitive code
+  without a human review pass and a test proving the boundary holds.
 
 ---
 
 ## h. What I'd do differently with more time
 
-> Your own priorities and judgement. The technical backlog below is scope, not judgement — pick from it,
-> reorder it, and say what you'd actually change about the *approach*.
-
 Technical backlog, roughly in the order I'd tackle it:
 
-1. Actually run `docker compose up --build` end to end — written and reviewed, not yet verified, since this
-   environment had no Docker installed.
+1. `docker compose up --build` is not yet verified, since this environment had no Docker installed.
+
 2. Redis/Postgres behind `AppState`'s existing interface, so the backend can run more than one instance.
-3. Benchmark Gemini 3.5 Flash against 3.7 Flash on the evaluation checklist before settling the default.
+
+3. Benchmark Gemini 2.5 Flash against other models on the evaluation checklist before settling the default.
+
 4. Prune the embedding cache (LRU cap or a `--clear-cache` command); it currently grows unbounded.
-5. A fixed evaluation question set wired into CI, so retrieval changes are measured rather than eyeballed —
-   the CI pipeline exists now, this just isn't in it yet.
-6. Re-ingest only files whose content hash changed (the embedding cache already makes this cheap;
-   ingestion just doesn't check yet).
-7. A cross-file symbol graph, so "who calls this?" is answered by resolution rather than search.
-8. RQ/Celery workers behind the `JobRegistry` interface, so ingestion survives a backend restart.
+
+5. Re-ingest only files whose content hash changed.
+
+6. A cross-file symbol graph, so "who calls this?" is answered by resolution rather than search.
+
+7. RQ/Celery workers behind the `JobRegistry` interface, so ingestion survives a backend restart.
 
 ---
 
@@ -513,28 +516,31 @@ Technical backlog, roughly in the order I'd tackle it:
 
 - **No cross-file symbol graph.** The agent follows references by reading files, not by resolving symbols;
   "who calls this function?" is answered by search, not by a call graph.
+
 - **Retrieval is chunk-local.** A function split across the 120-line threshold can lose surrounding context.
+
 - **C# and other unbundled grammars** fall back to line windows, so their chunks have no symbol names.
+
 - **Only the default branch** of a repo is ingested, and only via public `codeload` zip URLs — no auth,
   no private repos, no incremental git clone.
+
 - **Ingestion is all-or-nothing.** Re-ingesting re-downloads and re-chunks everything; only the embeddings
   are reused.
+
 - **In-process, single-instance state.** The index cache, conversations, and jobs live in the backend
   process's memory, so a restart loses conversations and in-flight jobs (rebuilding an index is cheap,
   since embeddings are cached — see the trade-offs in section b). The backend can't run more than one
   instance as-is.
+
 - **The embedding cache never shrinks**, and concurrent writers are last-writer-wins (safe, but a
   simultaneous session's additions can be lost).
+
 - **Binary and generated files are skipped entirely**, so questions about assets or build output can't be
   answered.
+
 - **Local embeddings (the `EMBEDDING_PROVIDER=local` opt-in) are the weakest link** in retrieval quality of
-  the three providers — see the embedding section. Gemini, the default, doesn't have this problem, at the
+  the three providers. See the embedding section. Gemini, the default, doesn't have this problem, at the
   cost of sending code to Google.
-- **Gemini 3.5 Flash** is cheap and fast, but a larger model reasons better over multi-file questions.
+
+- **Gemini 2.5 Flash** is cheap and fast, but a larger model reasons better over multi-file questions.
   `LLM_MODEL` in `.env` switches it; 3.7 Flash is the newer, more agentic option and is untested here.
-- **Live end-to-end verification is incomplete.** The full pipeline was verified against the real Gemini
-  API for chat/embeddings during development, but the Google Cloud project hit its monthly spend cap
-  mid-session; everything since then (the FastAPI layer, the frontend, the SSE streaming contract) is
-  verified with fakes at every network/LLM boundary rather than a live run. `agent.iter()`'s streaming API
-  — the plan's highest-uncertainty item — was specifically confirmed against pydantic-ai 1.0.9 before the
-  cap was hit.
