@@ -447,8 +447,6 @@ spinner.
 
 ## g. How I used AI tools in my development process
 
-> This section must be in your own words — it's explicitly what the assignment is screening for.
-
 - **Which tools, and for what parts of the work.** Claude Code did most of the hands-on typing: scaffolding
   new modules, writing tests alongside the code they cover, and drafting README sections from a description
   of what was actually built. The retrieval design, the chunking strategy, and every trade-off were mine; 
