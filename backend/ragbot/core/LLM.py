@@ -1,6 +1,6 @@
 """Chat model selection.
 
-pydantic-ai takes provider-prefixed model strings ("google-gla:gemini-3.5-flash",
+pydantic-ai takes provider-prefixed model strings ("google-gla:gemini-2.5-flash",
 "openai:gpt-4.1-nano"), so switching provider is a one-line .env change rather than
 a code change. This module owns the default and the key check.
 """
@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_MODEL = 'google-gla:gemini-3.5-flash'
+DEFAULT_MODEL = 'google-gla:gemini-2.5-flash'
 
 # Which credential each provider prefix needs, so a missing key is reported by name
 # up front instead of surfacing as a failure on the first question.

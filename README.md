@@ -250,37 +250,32 @@ can't silently mix vectors of two different shapes in one store.
 
 ### Vector database — and why there isn't one
 
-`minsearch` keeps TF-IDF and a numpy embedding matrix in memory and scores by brute-force cosine. Before
-reaching for something bigger, it's worth knowing where the time actually goes. Measured on this repo
+`minsearch` keeps keyword matching and a numpy embedding matrix in memory and scores by brute-force cosine. Before
+reaching for something bigger, it's worth knowing where the time actually goes. Measured on this same repo at testing time
 (112 chunks, 768-dim, local embeddings):
 
 | step | time |
 |---|---|
 | chunking (tree-sitter) | 0.03s |
-| fit TF-IDF index | 0.03s |
+| fit keyword index | 0.03s |
 | **embed the corpus** | **7.5s** (~67ms/chunk) |
 
-Extrapolating the search side to larger corpora:
+Extrapolating the search side to larger samples:
 
-| corpus | RAM | brute-force search | load cache from disk | embedding cost avoided |
+| sample | RAM | brute-force search | load cache from disk | embedding cost avoided |
 |---|---|---|---|---|
 | 5,000 chunks | 15 MB | 11.5 ms | 14 ms | ~5.6 min |
 | 20,000 chunks | 61 MB | 46 ms | 32 ms | ~22 min |
 | 100,000 chunks | 307 MB | 223 ms | 121 ms | ~1.9 hr |
 
-At the scale this targets, search is ~11ms — imperceptible next to a multi-second LLM call. Embedding is
+At the scale this project targets (small to medium codebases), search is ~11ms — imperceptible next to a multi-second LLM call. Embedding is
 ~99% of the repeatable cost. **A vector database would optimise the 11ms and leave the minutes untouched**,
-so the useful move was to cache vectors, not to add an engine. For reference, `chromadb` wanted ~40
-transitive packages (aiohttp, bcrypt, kubernetes, …) to speed up an operation that isn't slow.
+so the useful move was to cache vectors, not to add an database for over-engineering. For reference, `chromadb` wanted ~40
+transitive packages (aiohttp, bcrypt, kubernetes, …) to speed up an operation that isn't slow at this scale.
 
-**Options considered:** Chroma (embedded, but the heaviest dependency tree); LanceDB (embedded,
-memory-mapped, built-in full-text search); sqlite-vec (tiny, but vector-only — minsearch would stay for
-keyword); FAISS (index only, no metadata persistence); pgvector (needs a server, so not "fully local").
-
-**When to revisit:** past roughly 50–100k chunks — several repos indexed together, or a large monorepo —
-search crosses ~200ms and RAM passes 300MB. At that point **LanceDB** is the pick: it would replace *both*
-halves of retrieval (`minsearch.Index` and `VectorSearch`) and do hybrid natively instead of us fusing by
-hand.
+**When to revisit:** past roughly 100k chunks
+search crosses ~200ms and RAM passes 300MB. At that, it should replace *both*
+halves of retrieval (`minsearch.Index` and `VectorSearch`) and do hybrid natively.
 
 ### Persistence — a flat file, not a database
 
@@ -288,24 +283,17 @@ Vectors are cached to `backend/data/index/embeddings/<provider>_<model>/` as `ve
 `keys.json` mapping. Re-indexing a cached repo drops from **17.6s to effectively zero**, with identical
 results.
 
-- **Content-addressed by `sha256(chunk_text)`, not keyed per repo.** The cache invalidates itself: edit one
+- **Content-addressed by `sha256(chunk_text)`, not keyed per repo.** Edit one
   file and only its chunks are re-embedded (measured: 111 hits, 1 miss), and identical chunks — licence
   headers, boilerplate, empty `__init__.py` — are stored once, within and across repos. A per-repo snapshot
   would need an explicit cache-version constant and still go stale silently when the chunker changes.
+  
 - **Namespaced per model *and* dimension.** Gemini's default is 768-dim, OpenAI's is 1536-dim, and Gemini's
   own dimension is itself configurable (`EMBEDDING_DIMENSIONS`) — mixing any of these would be silent
   nonsense rather than a loud failure, so the dimension is part of the cache key, not just the model name.
-- **`.npy` with `allow_pickle=False`, not `minsearch.save()`.** Both `Index` and `VectorSearch` offer
-  pickle-based persistence, but pickling a fitted scikit-learn vectoriser is version-fragile and executes
-  arbitrary code on load — to save 0.03s of refitting.
+
 - **Only embeddings are cached; chunks are not.** Chunking takes 0.03s, so caching it would add
   invalidation logic to save nothing measurable.
-- **Queries are not cached**, only corpus chunks — a one-off query would just bloat the store.
-- **Atomic writes** (temp file + `os.replace`); a corrupt or desynchronised cache is detected on load and
-  rebuilt rather than trusted.
-
-Honest cost: the store grows without bound (~15MB per 5000 chunks) with **no pruning**, and concurrent
-writers are last-writer-wins — safe, but a simultaneous session's additions can be lost.
 
 ### Orchestration framework
 
@@ -313,36 +301,30 @@ writers are last-writer-wins — safe, but a simultaneous session's additions ca
 
 | Option | Trade-off |
 |---|---|
-| **pydantic-ai** (chosen) | Tools are plain Python functions — signature and docstring become the schema, so there's no separate tool spec to keep in sync. Structured outputs via pydantic models (used by the evaluation checklist), and a serialisable message history that the JSON logging depends on. Smaller and less abstracted than the alternatives. |
-| LangChain / LangGraph | Largest ecosystem and prebuilt RAG chains, but heavy abstractions over what is ultimately a short tool loop, and more indirection to debug. |
-| LlamaIndex | Strongest built-in RAG primitives (loaders, retrievers, indices) — but this project deliberately owns its chunking and retrieval, which is the interesting part. |
-| Raw OpenAI SDK | Zero abstraction, but the tool loop, schema generation, and message serialisation all become hand-written. |
-
-One dependency note worth recording: the project originally pinned `pydantic-ai`, the meta-package that
-pulls in *every* provider SDK (logfire, mistralai, anthropic, …). Their conflicting OpenTelemetry
-constraints resolved to a version missing a module `pydantic-ai` imports, breaking the install outright.
-Switching to `pydantic-ai-slim[openai]` — only what's used — fixed it.
+| **pydantic-ai** (chosen) | Tools are plain Python functions, so there's no separate tools to keep in sync. Structured outputs via pydantic models (used by the evaluation checklist), and a serialisable message history that the JSON logging depends on. Smaller and less abstracted than the alternatives. |
+| LangChain / LangGraph / Prebuilt RAG chains | Heavy abstractions over what is ultimately a short tool loop. Also, this project deliberately owns its chunking and retrieval, which is the interesting part. |
 
 ### Chunking
 
-Paragraph and markdown-heading splitting are meaningless for source code: they cut functions in half and
+Even if they are included for compatibility, completeness and legacy reasons,
+paragraph and markdown splitting are meaningless for source code: they cut functions in half and
 strand a body from its signature. Chunks are therefore cut at **real syntactic boundaries** — one function,
 method, or class per chunk, signature and docstring intact.
 
-**Options considered:** tree-sitter AST (chosen); Python's stdlib `ast` (no new dependency, but real
-structure only for `.py`, and most repos aren't Python); universal line windows (simplest, but splits
-functions mid-body).
+**Tree-sitter AST:** Syntax aware chunking Python's stdlib `ast`
 
 - **Multi-language.** `tree-sitter-language-pack` covers Python, JS/TS, Go, Rust, Java, Kotlin, Ruby, PHP,
-  C/C++, Swift, Scala, and Bash. Node type names differ per grammar (`function_definition` in Python,
-  `function_declaration` in Go, `function_item` in Rust), so the type map was read off the actual parsers
-  rather than assumed.
-- **Qualified symbols.** A method chunk is named `ClassName.method_name`, so symbol search resolves.
+  C/C++, Swift, Scala, and Bash.
+
+- **Qualified symbols.** A method chunk is named `ClassName.method_name`, so lexical search resolves.
+
 - **Large containers split.** A class over 120 lines becomes a header chunk plus one chunk per method;
-  smaller classes stay whole, since they read better that way.
-- **Module-level code is kept.** Imports and top-level constants become their own chunk — that's where
+  smaller classes stay whole.
+
+- **Module-level code is kept.** Imports and top-level constants become their own chunk. That's where
   dependency and configuration questions get answered.
-- **Everything degrades, nothing crashes.** Unsupported grammar (C# isn't bundled), a syntax error, or an
+
+- **No crashes.** Unsupported grammar, a syntax error, or an
   oversized node falls back to overlapping line windows. One bad file must never sink a repo's ingestion.
 
 Each chunk is embedded with a context header — `# path | language | Symbol (kind) | L12-34` — so the
@@ -354,15 +336,15 @@ Markdown keeps heading-based chunking, with line numbers so its citations link l
 ### Retrieval approach
 
 Keyword search nails exact identifiers; vector search handles "how does authentication work". Hybrid runs
-both and fuses by **reciprocal rank fusion** (`1/(60+rank)`), so a chunk both retrievers like outranks one
+both and fuses, so a chunk both retrievers like outranks one
 that only scored well in a single list. The earlier concatenate-and-dedupe approach always put every
 keyword hit above every vector hit regardless of relevance.
 
 ### Prompt & context management
 
 The system prompt tells the agent to search first, confirm with `read_file` before explaining, follow
-references across files, and cite `path:line` for every claim. Tool output is capped — 400 lines per
-`read_file`, 300 entries per `list_files`, 5 search results — so a single call can't swallow the context
+references across files, and cite `path:line` for every claim. Tool output is capped (400 lines per
+`read_file`, 300 entries per `list_files`, 5 search results) so a single call can't swallow the context
 window. When the repo URL is parseable, GitHub blob-link instructions are appended so citations become
 clickable.
 
@@ -375,7 +357,7 @@ inference as inference; decline off-repo questions.
 the same guard covers zip extraction (zip-slip). Both are covered by tests. Tool output caps bound context
 growth. The allowlist bounds what can enter the index at all.
 
-### Quality controls
+### QA / Testing
 
 `AgentLog.evaluate_log_record` runs an **LLM-as-judge** checklist over a logged run: instruction following,
 relevance, clarity, citations, completeness, whether search was actually called, and whether every claim is
@@ -395,12 +377,12 @@ into text/citation runs) and SSE frame parsing (multi-chunk reassembly, malforme
 ### Observability
 
 Every interaction is written to `backend/logs/*.json` with the full message trace, model, tools, and system
-prompt — enough to replay or evaluate any answer after the fact. `GET /api/repos/{key}` reports ingestion
+prompt. Enough to replay or evaluate any answer after the fact. `GET /api/repos/{key}` reports ingestion
 stats (files per language, chunk count) computed once at ingest time, and the ingestion job's SSE stream
 reports named phases (`downloading → chunking → embedding → indexing → ready`) instead of an indeterminate
 spinner.
 
-> _Gap worth naming: there are no latency or token-spend metrics yet, and nothing aggregates the logs._
+**Possible improvement:** Add latency or token-spend metrics.
 
 ---
 

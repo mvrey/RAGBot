@@ -13,7 +13,7 @@ def clean_env(monkeypatch):
 class TestModelSelection:
 
     def test_defaults_to_gemini_flash(self, clean_env):
-        assert LLM.get_model_name() == 'google-gla:gemini-3.5-flash'
+        assert LLM.get_model_name() == 'google-gla:gemini-2.5-flash'
 
     def test_env_overrides_the_default(self, clean_env):
         clean_env.setenv('LLM_MODEL', 'openai:gpt-4.1-nano')
@@ -46,12 +46,12 @@ class TestApiKeyResolution:
         assert LLM.required_api_key('somevendor:some-model') == ''
 
     def test_missing_key_is_reported_by_name(self, clean_env):
-        clean_env.setenv('LLM_MODEL', 'google-gla:gemini-3.5-flash')
+        clean_env.setenv('LLM_MODEL', 'google-gla:gemini-2.5-flash')
 
         assert LLM.missing_api_key() == 'GOOGLE_API_KEY'
 
     def test_present_key_reports_nothing(self, clean_env):
-        clean_env.setenv('LLM_MODEL', 'google-gla:gemini-3.5-flash')
+        clean_env.setenv('LLM_MODEL', 'google-gla:gemini-2.5-flash')
         clean_env.setenv('GOOGLE_API_KEY', 'test-key')
 
         assert LLM.missing_api_key() == ''
@@ -59,7 +59,7 @@ class TestApiKeyResolution:
     def test_switching_provider_changes_the_required_key(self, clean_env):
         # Guards the real failure mode: an OpenAI key set, but Gemini configured.
         clean_env.setenv('OPENAI_API_KEY', 'sk-test')
-        clean_env.setenv('LLM_MODEL', 'google-gla:gemini-3.5-flash')
+        clean_env.setenv('LLM_MODEL', 'google-gla:gemini-2.5-flash')
 
         assert LLM.missing_api_key() == 'GOOGLE_API_KEY'
 
@@ -83,5 +83,5 @@ class TestModelStringResolves:
         clean_env.setenv('GOOGLE_API_KEY', 'test-key')
         model = infer_model(LLM.DEFAULT_MODEL)
 
-        assert model.model_name == 'gemini-3.5-flash'
+        assert model.model_name == 'gemini-2.5-flash'
         assert model.system == 'google-gla'
