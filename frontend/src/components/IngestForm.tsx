@@ -7,29 +7,49 @@ import { api } from '@/lib/api';
 import { looksLikeRepoUrl, resolveCodeloadUrl } from '@/lib/validation';
 import { buildFolderUpload } from '@/lib/zipFolder';
 import { JobProgress } from '@/components/JobProgress';
+import type { JobStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
+export interface StartedIngestion {
+  jobId: string;
+  repoKey: string;
+  displayName: string;
+}
+
 interface IngestFormProps {
-  onIngested: (repoKey: string) => void;
+  /** Non-null once an ingestion is under way - HomePage owns the job's SSE
+   * subscription (so progress survives this form being unmounted while the
+   * dialog is minimized), and just hands the latest status down. */
+  job: JobStatus | null;
+  /** Shown on the form after a job HomePage already cleared has failed. */
+  error: string | null;
+  onStarted: (info: StartedIngestion) => void;
 }
 
 type Mode = 'github' | 'local';
 
-export function IngestForm({ onIngested }: IngestFormProps) {
+/** Best-effort "owner/repo" label for a pending card, straight from what the
+ * user typed - good enough before the real ingest result comes back. */
+function githubLabelFromUrl(url: string): string {
+  const match = url.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
+  return match ? `${match[1]}/${match[2]}` : url;
+}
+
+export function IngestForm({ job, error, onStarted }: IngestFormProps) {
   const [mode, setMode] = useState<Mode>('github');
   const [repoUrl, setRepoUrl] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
   const [chunkingStrategy, setChunkingStrategy] = useState('AUTO');
   const [searchMethod, setSearchMethod] = useState('HYBRID');
   const [touched, setTouched] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [failedMessage, setFailedMessage] = useState<string | null>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   const { data: config } = useQuery({ queryKey: ['config'], queryFn: api.config });
+
+  const folderName = selectedFiles?.[0]?.webkitRelativePath.split('/')[0];
 
   const ingest = useMutation({
     mutationFn: async () => {
@@ -46,16 +66,17 @@ export function IngestForm({ onIngested }: IngestFormProps) {
       const { name, zipBytes } = await buildFolderUpload(selectedFiles);
       return api.uploadRepo({ zipBytes, name, chunking_strategy: chunkingStrategy, search_method: searchMethod });
     },
-    onSuccess: (data) => setJobId(data.job_id),
+    onSuccess: (data) => {
+      const displayName = mode === 'github' ? githubLabelFromUrl(repoUrl) : (folderName ?? data.repo_key);
+      onStarted({ jobId: data.job_id, repoKey: data.repo_key, displayName });
+    },
   });
 
   const isValid = mode === 'github' ? looksLikeRepoUrl(repoUrl) : !!selectedFiles && selectedFiles.length > 0;
-  const folderName = selectedFiles?.[0]?.webkitRelativePath.split('/')[0];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setTouched(true);
-    setFailedMessage(null);
     if (!isValid) return;
     ingest.mutate();
   };
@@ -63,20 +84,10 @@ export function IngestForm({ onIngested }: IngestFormProps) {
   const switchMode = (value: string) => {
     setMode(value as Mode);
     setTouched(false);
-    setFailedMessage(null);
   };
 
-  if (jobId) {
-    return (
-      <JobProgress
-        jobId={jobId}
-        onSucceeded={onIngested}
-        onFailed={(message) => {
-          setFailedMessage(message);
-          setJobId(null);
-        }}
-      />
-    );
+  if (job) {
+    return <JobProgress job={job} />;
   }
 
   return (
@@ -179,9 +190,9 @@ export function IngestForm({ onIngested }: IngestFormProps) {
         </div>
       </div>
 
-      {(ingest.isError || failedMessage) && (
+      {(ingest.isError || error) && (
         <p className="text-base text-destructive">
-          {failedMessage ?? (ingest.error instanceof Error ? ingest.error.message : 'Ingestion failed.')}
+          {error ?? (ingest.error instanceof Error ? ingest.error.message : 'Ingestion failed.')}
         </p>
       )}
 

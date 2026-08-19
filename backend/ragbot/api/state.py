@@ -70,6 +70,7 @@ class JobRegistry:
             'created_at': time.time(),
             'version': 0,
             'progress': None,
+            'cancelled': False,
         }
         return job_id
 
@@ -82,6 +83,20 @@ class JobRegistry:
             return
         job.update(fields)
         job['version'] += 1
+
+    def cancel(self, job_id: str) -> bool:
+        """Flag a job for cooperative cancellation.
+
+        There's no hard interrupt for the worker-thread chunking/embedding calls
+        already in flight, so the pipeline in jobs.py checks this flag between
+        stages (and inside the chunk/embed progress callbacks) and unwinds itself
+        rather than being killed from the outside.
+        """
+        job = self._jobs.get(job_id)
+        if job is None or job['status'] in ('succeeded', 'failed'):
+            return False
+        job['cancelled'] = True
+        return True
 
 
 class ConversationStore:

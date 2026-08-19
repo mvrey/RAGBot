@@ -1,8 +1,8 @@
-# No torch: EMBEDDING_PROVIDER=google (the default) needs only the lightweight
-# google-genai client, which is what keeps this image to roughly 400MB instead
-# of the ~2.5GB that sentence-transformers + torch would add. tree-sitter and
-# tree-sitter-language-pack ship manylinux wheels, so no compiler is needed
-# either - this stays a single stage.
+# sentence-transformers (and its torch dependency, ~2.5GB) is a base dependency,
+# not an extra - EMBEDDING_PROVIDER=local is the default, so a fresh
+# `docker compose up --build` must be able to run it without opting into
+# anything. tree-sitter and tree-sitter-language-pack ship manylinux wheels,
+# so no compiler is needed either - this stays a single stage.
 FROM python:3.13-slim
 
 RUN groupadd --system ragbot && useradd --system --gid ragbot --create-home ragbot

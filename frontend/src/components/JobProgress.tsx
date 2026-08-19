@@ -1,8 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CircleDashed, Loader2, XCircle } from 'lucide-react';
-import { streamJobEvents } from '@/lib/api';
 import type { JobPhase, JobStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -17,41 +15,16 @@ function phasesFor(kind: string | undefined): { key: JobPhase; label: string }[]
 }
 
 interface JobProgressProps {
-  jobId: string;
-  onSucceeded: (repoKey: string) => void;
-  onFailed?: (message: string) => void;
+  job: JobStatus;
 }
 
-/** Named-phase progress for a repo ingestion job, driven by its SSE stream. */
-export function JobProgress({ jobId, onSucceeded, onFailed }: JobProgressProps) {
-  const [job, setJob] = useState<JobStatus | null>(null);
-  const settledRef = useRef(false);
-
-  useEffect(() => {
-    settledRef.current = false;
-    const controller = new AbortController();
-
-    (async () => {
-      try {
-        for await (const status of streamJobEvents(jobId, controller.signal)) {
-          setJob(status);
-          if (status.status === 'succeeded' && status.result && !settledRef.current) {
-            settledRef.current = true;
-            onSucceeded(status.result.repo_key);
-          } else if (status.status === 'failed' && !settledRef.current) {
-            settledRef.current = true;
-            onFailed?.(status.error ?? 'Ingestion failed.');
-          }
-        }
-      } catch {
-        // AbortError on unmount, or a transient network drop - the job status
-        // endpoint still exists for a manual retry, so this fails soft.
-      }
-    })();
-
-    return () => controller.abort();
-  }, [jobId, onSucceeded, onFailed]);
-
+/** Named-phase progress for a repo ingestion job.
+ *
+ * Purely presentational - the parent (HomePage) owns the SSE subscription and
+ * passes the latest status down, so progress keeps updating even while this
+ * component is unmounted (the ingest dialog minimized) and remounts already
+ * showing the current phase instead of restarting from "Starting…". */
+export function JobProgress({ job }: JobProgressProps) {
   const phases = phasesFor(job?.kind);
   const currentIndex = job?.phase ? phases.findIndex((p) => p.key === job.phase) : -1;
   const failed = job?.status === 'failed';

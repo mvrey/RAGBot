@@ -29,6 +29,16 @@ def get_job(job_id: str, state: AppState = Depends(get_state)) -> JobStatus:
     return _to_job_status(job)
 
 
+@router.post('/{job_id}/cancel', status_code=204)
+def cancel_job(job_id: str, state: AppState = Depends(get_state)) -> None:
+    """Ask a running ingestion job to stop. Cooperative, not immediate - see
+    JobRegistry.cancel - so the job may still report a status update or two
+    before it actually unwinds."""
+    if state.jobs.get(job_id) is None:
+        raise HTTPException(404, f"No job '{job_id}'.")
+    state.jobs.cancel(job_id)
+
+
 @router.get('/{job_id}/events')
 async def job_events(job_id: str, state: AppState = Depends(get_state)):
     if state.jobs.get(job_id) is None:

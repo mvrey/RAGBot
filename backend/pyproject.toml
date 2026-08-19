@@ -15,18 +15,13 @@ dependencies = [
     "python-frontmatter>=1.1.0",
     "python-multipart>=0.0.9",
     "requests>=2.32.5",
+    # Pulls in torch - EMBEDDING_PROVIDER=local is the default, so a plain
+    # install must already be able to run it, not just the opt-in providers.
+    "sentence-transformers>=5.1.1",
     "sse-starlette>=2.1.0",
     "tree-sitter>=0.25.0",
     "tree-sitter-language-pack>=1.14.0",
     "uvicorn[standard]>=0.30.0",
-]
-
-[project.optional-dependencies]
-# EMBEDDING_PROVIDER=local pulls in torch by way of sentence-transformers, which
-# is why it is opt-in rather than a base dependency - the default provider is
-# Gemini, and the container image should not pay a ~2GB torch tax for it.
-local-embeddings = [
-    "sentence-transformers>=5.1.1",
 ]
 
 [project.scripts]

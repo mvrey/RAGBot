@@ -27,7 +27,8 @@ The app is a FastAPI backend + Next.js frontend, split into `backend/` and `fron
 
 **Requirements:**
 
-* a **Google Gemini API key** used for both the chat model and the default embedding provider.
+* a **Google Gemini API key** for the chat model. Embeddings run fully locally by default — no key or
+  network needed for indexing, unless you opt into `EMBEDDING_PROVIDER=google` or `openai`.
 
 ### Docker Compose
 
@@ -52,7 +53,7 @@ cd backend
 python -m venv .venv
 .venv\Scripts\Activate.ps1                # Windows PowerShell
 # source .venv/bin/activate               # Linux / macOS
-pip install -e .                          # add '.[local-embeddings]' for EMBEDDING_PROVIDER=local
+pip install -e .                          # includes sentence-transformers/torch for the default local embedder
 cp .env.example .env                      # then edit .env and add GOOGLE_API_KEY
 
 python -m uvicorn ragbot.api.main:app --reload
@@ -97,7 +98,7 @@ cd frontend && npm test                   # 34 tests (vitest)
 
 ## b. Architecture overview
 
-SEE docs/architecture.jpg
+![Architecture overview](docs/architecture.jpg)
 
 
 | Module | Responsibility |
@@ -149,7 +150,7 @@ Hybrid mode fuses the two ranked lists with reciprocal rank fusion.
 
 ### Trade-offs made splitting into backend + frontend
 
-Three decisions were made explicitly for a simpler single-instance demo, each with a stated upgrade path:
+Two decisions were made explicitly for a simpler single-instance demo, each with a stated upgrade path:
 
 **1. Single-user state, in-process.** The index cache, conversation store, and job registry
 (`backend/ragbot/api/state.py`) are plain Python objects keyed by `(repo_key, chunking, search_method)` /
@@ -165,13 +166,6 @@ broker to operate for a demo.
 Cost: a job dies if the process restarts mid-ingestion, it can't be retried
 or distributed across instances, and a big ingestion competes with request-serving CPU (although they run on different threads). 
 Upgrade path: RQ or Celery with workers, behind the same `JobRegistry` interface.
-
-**3. Gemini embeddings over the local model by default.** `EMBEDDING_PROVIDER=google` instead of `local`. 
-Payoff: no torch in the dependency tree — the backend image is ~400MB instead
-of the ~2.5GB `sentence-transformers` pulls in. 
-Cost: **every chunk of every ingested repo is sent to Google**, and
-indexing now needs network access and API spend instead of running fully offline. For private or
-air-gapped code this is the wrong default;
 
 ---
 
@@ -223,22 +217,29 @@ name, before the first question** rather than failing mid-query. The same model 
 
 ### Embedding model
 
-**Final choice:** pluggable, defaulting to Gemini. Set in `.env`:
+**Final choice:** pluggable, defaulting to a local model. Set in `.env`:
 
 ```
-EMBEDDING_PROVIDER=google        # default: gemini-embedding-2, needs GOOGLE_API_KEY
-EMBEDDING_PROVIDER=local         # free, offline, no key (pip install '.[local-embeddings]')
-EMBEDDING_PROVIDER=openai        # text-embedding-3-small
-EMBEDDING_MODEL=...              # optional override for whichever provider
-EMBEDDING_DIMENSIONS=768         # google only; 128-3072, default 768
-EMBEDDING_CACHE=0                # optional: disable the on-disk vector cache
+EMBEDDING_PROVIDER=local          # default: multi-qa-distilbert-cos-v1, free, offline, no key
+EMBEDDING_PROVIDER=google         # gemini-embedding-2, needs GOOGLE_API_KEY
+EMBEDDING_PROVIDER=openai         # text-embedding-3-small, needs OPENAI_API_KEY
+EMBEDDING_MODEL=...               # optional override for whichever provider
+EMBEDDING_DIMENSIONS=768          # google only; 128-3072, default 768
+EMBEDDING_CACHE=0                 # optional: disable the on-disk vector cache
 ```
 
 | Option | Trade-off |
 |---|---|
-| **`gemini-embedding-2`** (default) | Retrieves noticeably better on code than the old local default, and needs no torch in the image (~400MB vs ~2.5GB). Needs `GOOGLE_API_KEY`, network at index time, and sends every chunk to Google. |
-| `text-embedding-3-small` (supported) | Also handles code well, ~$0.02/1M tokens. Needs `OPENAI_API_KEY` and network. |
-| local `multi-qa-distilbert-cos-v1` (supported, opt-in) | Free, offline, no key — the only fully air-gapped option. Trained for natural-language QA over prose, not source code, so it's the weakest of the three on retrieval quality; also the only one requiring `pip install '.[local-embeddings]'` (torch). |
+| **local `multi-qa-distilbert-cos-v1`** (default) | Free, offline, no key — no chunk of the ingested code ever leaves the machine, and indexing works with no network at all. Trained for natural-language QA over prose, not source code, so it's the weakest of the three on retrieval quality. |
+| `gemini-embedding-2` (opt-in) | Retrieves noticeably better on code than the local default. Needs `GOOGLE_API_KEY`, network at index time, and sends every chunk to Google. |
+| `text-embedding-3-small` (opt-in) | Also handles code well, ~$0.02/1M tokens. Needs `OPENAI_API_KEY` and network. |
+
+The aim is to keep the project as self-contained as reasonable: indexing a codebase shouldn't require
+handing it to a third party or spending API credits unless that's a deliberate choice, so the default pays
+for that in retrieval quality rather than in cost or privacy. Gemini and OpenAI are one `.env` line away for
+anyone who'd rather have the better retrieval and is fine with the trade-off — `sentence-transformers` (and
+the ~2.5GB of torch it pulls in) is a base dependency now precisely because a plain install has to be able
+to run the default provider out of the box.
 
 All three are implemented behind one `Embedder` interface, so switching is a one-line `.env` change. Gemini
 doesn't support the old `task_type` parameter for asymmetric query/document retrieval that some embedding
@@ -393,7 +394,7 @@ spinner.
 | Option 2 (Code Documentation Assistant) | Chosen because it's the most challenging of the assignment's options. It exercises AST-aware chunking, a multi-tool agent, a full API/frontend split, and production considerations in one project, which best demonstrates range across the stack. |
 | FastAPI + Next.js split (from a Streamlit monolith) | Two independently deployable services map onto a microservices topology: backend and frontend scale independently, ship as separate containers with their own release cycles, and a cloud load balancer can route and autoscale each tier on its own metrics instead of one monolithic process — see [section c](#c-production-on-a-hyper-scaler) for the target cloud topology. |
 | tree-sitter AST chunking over simpler splitting | See [Chunking](#chunking). Chunking on real syntactic boundaries instead of fixed-size splits keeps each chunk (a function, class, or method) semantically whole rather than cut mid-definition. |
-| Gemini embeddings by default, local/OpenAI opt-in | The goal was to keep the setup as close to fully local and self-contained as reasonable, without over-engineering the provider abstraction, while balancing retrieval quality against dependency weight. Gemini wins that trade-off by default. See [Embedding model](#embedding-model) for the full comparison against local and OpenAI. |
+| Local embeddings by default, Gemini/OpenAI opt-in | The goal was to keep the setup as close to fully local and self-contained as reasonable, without over-engineering the provider abstraction, while balancing retrieval quality against privacy and cost. Local wins that trade-off by default. See [Embedding model](#embedding-model) for the full comparison against Gemini and OpenAI. |
 | minsearch + flat-file cache over a vector DB | Covered under [Vector database — and why there isn't one](#vector-database--and-why-there-isnt-one): at this project's scale brute-force search is already fast, so a vector database would optimize a step that was never the bottleneck. |
 | Three agent tools rather than one-shot retrieval | Explained in [section b](#b-architecture-overview). One-shot similarity search answers "what does X do" but not "where is X implemented," so the agent gets `search_code`, `read_file`, and `list_files` and decides when to use each. |
 | pydantic-ai as orchestrator | Covered under [Orchestration framework](#orchestration-framework): tools as plain Python functions, structured outputs, and a serialisable message history, without the abstraction weight of LangChain-style chains. |
@@ -536,9 +537,9 @@ Technical backlog, roughly in the order I'd tackle it:
 - **Binary and generated files are skipped entirely**, so questions about assets or build output can't be
   answered.
 
-- **Local embeddings (the `EMBEDDING_PROVIDER=local` opt-in) are the weakest link** in retrieval quality of
-  the three providers. See the embedding section. Gemini, the default, doesn't have this problem, at the
-  cost of sending code to Google.
+- **Local embeddings (the default) are the weakest link** in retrieval quality of the three providers — see
+  the embedding section. `EMBEDDING_PROVIDER=google` doesn't have this problem, at the cost of a key,
+  network access, and sending every chunk of the repo to Google.
 
 - **Gemini 2.5 Flash** is cheap and fast, but a larger model reasons better over multi-file questions.
   `LLM_MODEL` in `.env` switches it; 3.7 Flash is the newer, more agentic option and is untested here.

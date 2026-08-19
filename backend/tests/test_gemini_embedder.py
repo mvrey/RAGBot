@@ -175,10 +175,19 @@ class TestApiKey:
 
 class TestProviderSelection:
 
-    def test_get_embedder_defaults_to_google(self, monkeypatch):
+    def test_get_embedder_defaults_to_local(self, monkeypatch):
         from ragbot.core.Embeddings import get_embedder
 
         monkeypatch.delenv('EMBEDDING_PROVIDER', raising=False)
+
+        embedder = get_embedder()
+
+        assert embedder.name.startswith('local:multi-qa-distilbert-cos-v1')
+
+    def test_get_embedder_selects_google_explicitly(self, monkeypatch):
+        from ragbot.core.Embeddings import get_embedder
+
+        monkeypatch.setenv('EMBEDDING_PROVIDER', 'google')
         monkeypatch.setenv('GOOGLE_API_KEY', 'test-key')
 
         embedder = get_embedder()

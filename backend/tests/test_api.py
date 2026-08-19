@@ -179,6 +179,48 @@ class TestIngestionLifecycle:
         assert 'event: status' in text
         assert 'succeeded' in text
 
+    async def test_cancelling_mid_ingestion_stops_it(self, client, monkeypatch):
+        """Cancel the job from inside its own progress callback - the only
+        window this test harness gives us, since ASGITransport runs the whole
+        background task to completion before client.post() returns."""
+        from ragbot.api.state import JobRegistry
+
+        already_cancelled = set()
+        original_update = JobRegistry.update
+
+        def cancel_on_first_progress(self, job_id, **fields):
+            original_update(self, job_id, **fields)
+            if fields.get('progress') is not None and job_id not in already_cancelled:
+                already_cancelled.add(job_id)
+                self.cancel(job_id)
+
+        monkeypatch.setattr(JobRegistry, 'update', cancel_on_first_progress)
+
+        resp = await client.post('/api/repos', json={
+            'repo_url': REPO_URL, 'chunking_strategy': 'AUTO', 'search_method': 'HYBRID',
+        })
+        job_id = resp.json()['job_id']
+
+        job = (await client.get(f'/api/jobs/{job_id}')).json()
+        assert job['status'] == 'failed'
+        assert job['error'] == 'Cancelled by user.'
+
+        # The partially-ingested repo is cleaned off disk, not left behind half-built.
+        assert (await client.get(f'/api/repos/{REPO_KEY}')).status_code == 404
+
+    async def test_cancel_unknown_job_is_404(self, client):
+        resp = await client.post('/api/jobs/does-not-exist/cancel')
+        assert resp.status_code == 404
+
+    async def test_cancelling_a_finished_job_is_a_noop(self, client):
+        job_id, _ = await _ingest(client)
+
+        resp = await client.post(f'/api/jobs/{job_id}/cancel')
+        assert resp.status_code == 204
+
+        job = (await client.get(f'/api/jobs/{job_id}')).json()
+        assert job['status'] == 'succeeded'
+
     async def test_repo_appears_in_listing_after_ingest(self, client):
         await _ingest(client)
 

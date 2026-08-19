@@ -5,6 +5,8 @@ die with the process. See docs/PLAN-fullstack-split.md section 6 and the
 README trade-off writeup.
 """
 
+import shutil
+
 import anyio
 
 from ragbot.core.AgentWrapper import AgentWrapper
@@ -13,7 +15,23 @@ from ragbot.core.Embeddings import get_embedder
 from ragbot.core.Prompts import Prompts
 from ragbot.core.Repository import CHUNK_COUNT_WARNING_THRESHOLD, Repository
 from ragbot.core.SearchStrategy import SearchStrategy, SearchStrategyType
-from ragbot.api.state import AppState, BuiltIndex, update_repo_meta
+from ragbot.api.state import AppState, BuiltIndex, JobRegistry, update_repo_meta
+
+
+class JobCancelled(Exception):
+    """Unwinds an ingestion job once its 'cancelled' flag is set.
+
+    There's no hard interrupt for chunking/embedding running in a worker
+    thread, so this is raised cooperatively from _check_cancelled - called
+    between pipeline stages and from inside the chunk/embed progress
+    callbacks, which is what makes cancellation land promptly even mid-stage.
+    """
+
+
+def _check_cancelled(jobs: JobRegistry, job_id: str) -> None:
+    job = jobs.get(job_id)
+    if job is not None and job.get('cancelled'):
+        raise JobCancelled()
 
 
 async def run_ingest_job(
@@ -35,8 +53,12 @@ async def run_ingest_job(
             return repository.get_repo_files(), False
 
         files, from_cache = await anyio.to_thread.run_sync(_load_or_download)
+        _check_cancelled(jobs, job_id)
         source = 'cache' if from_cache else 'download'
         await _finish_ingest_job(state, job_id, repository, files, chunking_name, search_method_name, source, None)
+    except JobCancelled:
+        shutil.rmtree(repository.repo_dir, ignore_errors=True)
+        jobs.update(job_id, status='failed', phase=None, error='Cancelled by user.', message='Cancelled by user.')
     except Exception as e:
         jobs.update(job_id, status='failed', phase=None, error=str(e), message=str(e))
 
@@ -64,9 +86,13 @@ async def run_upload_ingest_job(
         repository = Repository(f'local:{name}', repo_key=repo_key)
 
         files = await anyio.to_thread.run_sync(repository.load_from_zip_bytes, zip_bytes)
+        _check_cancelled(jobs, job_id)
         # The folder's own name reads much better as the initial display name
         # than the repo_key's random-suffixed slug - still renameable after.
         await _finish_ingest_job(state, job_id, repository, files, chunking_name, search_method_name, 'upload', name)
+    except JobCancelled:
+        shutil.rmtree(repository.repo_dir, ignore_errors=True)
+        jobs.update(job_id, status='failed', phase=None, error='Cancelled by user.', message='Cancelled by user.')
     except Exception as e:
         jobs.update(job_id, status='failed', phase=None, error=str(e), message=str(e))
 
@@ -86,12 +112,14 @@ async def _finish_ingest_job(
     jobs.update(job_id, phase='chunking', message=f'{len(files)} files loaded ({source})', progress=None)
 
     def _on_chunk_progress(done: int, total: int) -> None:
+        _check_cancelled(jobs, job_id)
         jobs.update(job_id, progress={'current': done, 'total': total})
 
     chunking_strategy = ChunkingStrategy[chunking_name]
     chunks = await anyio.to_thread.run_sync(
         lambda: repository.chunk(chunking_strategy, on_progress=_on_chunk_progress)
     )
+    _check_cancelled(jobs, job_id)
 
     message = f'{len(chunks)} chunks created'
     if len(chunks) > CHUNK_COUNT_WARNING_THRESHOLD:
@@ -99,6 +127,7 @@ async def _finish_ingest_job(
     jobs.update(job_id, phase='embedding', message=message, progress=None)
 
     def _on_embed_progress(done: int, total: int) -> None:
+        _check_cancelled(jobs, job_id)
         jobs.update(job_id, progress={'current': done, 'total': total})
 
     embedder = get_embedder()
@@ -110,6 +139,7 @@ async def _finish_ingest_job(
             search_strategy.searcher._get_vector_index(chunks, on_progress=_on_embed_progress)
 
     await anyio.to_thread.run_sync(_build_vector_index)
+    _check_cancelled(jobs, job_id)
 
     jobs.update(job_id, phase='indexing', message='Setting up the agent', progress=None)
 
@@ -121,6 +151,7 @@ async def _finish_ingest_job(
         return agent_wrapper
 
     agent_wrapper = await anyio.to_thread.run_sync(_build_agent)
+    _check_cancelled(jobs, job_id)
 
     index_key = (repository.repo_key, chunking_name, search_method_name)
     state.indexes.put(index_key, BuiltIndex(repository, chunks, search_strategy, agent_wrapper))

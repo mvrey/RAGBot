@@ -1,10 +1,12 @@
 """Embedding providers.
 
-Gemini (google-genai) is the default: no torch in the dependency tree, and it
-retrieves noticeably better on source code than the local model. Setting
-EMBEDDING_PROVIDER=local swaps in sentence-transformers for a fully offline,
-no-API-key setup; EMBEDDING_PROVIDER=openai swaps in text-embedding-3-small.
-See the README for the trade-off.
+sentence-transformers (EMBEDDING_PROVIDER=local) is the default: fully offline,
+no API key, and no chunk of the ingested code ever leaves the machine - in
+keeping with the project's aim to stay as self-contained as reasonable.
+EMBEDDING_PROVIDER=google swaps in Gemini for noticeably better retrieval on
+code, at the cost of a key, network access, and sending every chunk to Google;
+EMBEDDING_PROVIDER=openai swaps in text-embedding-3-small. See the README for
+the trade-off.
 """
 
 import hashlib
@@ -361,7 +363,7 @@ class CachingEmbedder(Embedder):
 
 def get_embedder() -> Embedder:
     """Build the embedder selected by EMBEDDING_PROVIDER / EMBEDDING_MODEL."""
-    provider = os.getenv('EMBEDDING_PROVIDER', 'google').strip().lower()
+    provider = os.getenv('EMBEDDING_PROVIDER', 'local').strip().lower()
     model = os.getenv('EMBEDDING_MODEL', '').strip()
 
     if provider == 'google':
