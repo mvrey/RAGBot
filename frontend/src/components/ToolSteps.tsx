@@ -25,18 +25,18 @@ export function ToolSteps({ steps }: { steps: ToolStep[] }) {
       {open && (
         <ul className="space-y-1 px-2.5 pb-2">
           {steps.map((step) => (
-            <li key={step.id} className="flex items-start gap-1.5 text-muted-foreground">
+            <li key={step.id} className="flex min-w-0 items-start gap-1.5 text-muted-foreground">
               {step.result ? (
                 <CheckCircle2 className="mt-0.5 size-3 shrink-0 text-emerald-500" />
               ) : (
                 <Loader2 className="mt-0.5 size-3 shrink-0 animate-spin" />
               )}
-              <span>
+              <span className="min-w-0 break-words">
                 <span className="font-mono text-foreground">{step.tool}</span>
                 {step.args && Object.keys(step.args).length > 0 && (
                   <span className="font-mono"> ({Object.values(step.args).map(String).join(', ')})</span>
                 )}
-                {step.result?.summary && <span className="block truncate opacity-80">{step.result.summary}</span>}
+                {step.result?.summary && <span className="block opacity-80">{step.result.summary}</span>}
               </span>
             </li>
           ))}
