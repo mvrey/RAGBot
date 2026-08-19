@@ -3,7 +3,7 @@
 import { use, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Files, FileCode2, Pencil } from 'lucide-react';
+import { ArrowLeft, Files, Pencil } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { CitationMatch } from '@/lib/citations';
 import { ChatPanel } from '@/components/ChatPanel';
@@ -11,14 +11,12 @@ import { FileTree } from '@/components/FileTree';
 import { RenameRepoDialog, type RenameTarget } from '@/components/RenameRepoDialog';
 import { SourceViewer, type OpenTarget } from '@/components/SourceViewer';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export default function RepoWorkspacePage({ params }: { params: Promise<{ key: string }> }) {
   const { key: repoKey } = use(params);
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<OpenTarget | null>(null);
-  const [tab, setTab] = useState('source');
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
 
   const { data: repo, isLoading, isError } = useQuery({
@@ -28,12 +26,10 @@ export default function RepoWorkspacePage({ params }: { params: Promise<{ key: s
 
   const openCitation = (citation: CitationMatch) => {
     setTarget({ path: citation.path, start: citation.start, end: citation.end });
-    setTab('source');
   };
 
   const openFile = (path: string) => {
     setTarget({ path });
-    setTab('source');
   };
 
   if (isError) {
@@ -84,25 +80,19 @@ export default function RepoWorkspacePage({ params }: { params: Promise<{ key: s
           />
         </section>
 
-        <section className="flex min-h-0 flex-col">
-          <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
-            <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-2">
-              <TabsTrigger value="source" className="gap-1.5">
-                <FileCode2 className="size-3.5" />
-                Source
-              </TabsTrigger>
-              <TabsTrigger value="files" className="gap-1.5">
-                <Files className="size-3.5" />
-                Files
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="source" className="min-h-0 flex-1">
-              <SourceViewer repoKey={repoKey} target={target} />
-            </TabsContent>
-            <TabsContent value="files" className="min-h-0 flex-1">
+        <section className="flex min-h-0">
+          <div className="flex w-56 shrink-0 flex-col border-r">
+            <div className="flex items-center gap-1.5 border-b px-3 py-2 text-sm font-medium">
+              <Files className="size-3.5" />
+              Files
+            </div>
+            <div className="min-h-0 flex-1">
               <FileTree repoKey={repoKey} selectedPath={target?.path} onSelectFile={openFile} />
-            </TabsContent>
-          </Tabs>
+            </div>
+          </div>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <SourceViewer repoKey={repoKey} target={target} />
+          </div>
         </section>
       </div>
 
