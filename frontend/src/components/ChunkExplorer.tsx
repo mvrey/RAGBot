@@ -57,7 +57,7 @@ export function ChunkExplorer({ repoKey, enabled }: ChunkExplorerProps) {
   const files = groupByFile(data.chunks);
 
   return (
-    <ScrollArea className="max-h-80 rounded-lg border">
+    <ScrollArea className="max-h-80 rounded-lg">
       <div className="divide-y">
         {files.map((file) => (
           <FileRow key={file.filename} file={file} repoKey={repoKey} />
