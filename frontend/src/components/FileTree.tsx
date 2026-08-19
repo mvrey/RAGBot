@@ -5,7 +5,6 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, File, Folder } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { FileNode } from '@/lib/types';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -32,13 +31,13 @@ export function FileTree({ repoKey, selectedPath, onSelectFile }: FileTreeProps)
   }
 
   return (
-    <ScrollArea className="h-full">
+    <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="p-2">
         {data?.root.map((node) => (
           <TreeNode key={node.path} node={node} depth={0} selectedPath={selectedPath} onSelectFile={onSelectFile} />
         ))}
       </div>
-    </ScrollArea>
+    </div>
   );
 }
 

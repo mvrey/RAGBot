@@ -44,8 +44,8 @@ export default function RepoWorkspacePage({ params }: { params: Promise<{ key: s
   }
 
   return (
-    <main className="flex flex-1 flex-col">
-      <header className="flex items-center gap-3 border-b px-4 py-2.5">
+    <main className="flex h-dvh flex-col overflow-hidden">
+      <header className="flex shrink-0 items-center gap-3 border-b px-4 py-2.5">
         <Link href="/" className="text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-4" />
         </Link>
@@ -70,8 +70,8 @@ export default function RepoWorkspacePage({ params }: { params: Promise<{ key: s
         )}
       </header>
 
-      <div className="grid flex-1 grid-cols-1 md:grid-cols-2">
-        <section className="flex min-h-0 flex-col border-r">
+      <div className="flex min-h-0 flex-1">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col border-r">
           <ChatPanel
             key={repoKey}
             repoKey={repoKey}
@@ -80,19 +80,16 @@ export default function RepoWorkspacePage({ params }: { params: Promise<{ key: s
           />
         </section>
 
-        <section className="flex min-h-0">
-          <div className="flex w-56 shrink-0 flex-col border-r">
-            <div className="flex items-center gap-1.5 border-b px-3 py-2 text-sm font-medium">
-              <Files className="size-3.5" />
-              Files
-            </div>
-            <div className="min-h-0 flex-1">
-              <FileTree repoKey={repoKey} selectedPath={target?.path} onSelectFile={openFile} />
-            </div>
+        <section className="flex min-h-0 w-64 shrink-0 flex-col border-r">
+          <div className="flex shrink-0 items-center gap-1.5 border-b px-3 py-2 text-sm font-medium">
+            <Files className="size-3.5" />
+            Files
           </div>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <SourceViewer repoKey={repoKey} target={target} />
-          </div>
+          <FileTree repoKey={repoKey} selectedPath={target?.path} onSelectFile={openFile} />
+        </section>
+
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <SourceViewer repoKey={repoKey} target={target} />
         </section>
       </div>
 

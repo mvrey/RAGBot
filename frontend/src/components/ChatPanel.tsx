@@ -11,7 +11,6 @@ import { AnswerText } from '@/components/AnswerText';
 import { ToolSteps } from '@/components/ToolSteps';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 
 interface ChatPanelProps {
@@ -49,7 +48,7 @@ export function ChatPanel({ repoKey, onOpenCitation, activeCitation }: ChatPanel
   const chat = useChat(conversationId, conversation?.messages ?? []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [chat.messages, chat.streamingAnswer]);
 
   const clearChat = useMutation({
@@ -83,7 +82,7 @@ export function ChatPanel({ repoKey, onOpenCitation, activeCitation }: ChatPanel
         </Button>
       </div>
 
-      <ScrollArea className="flex-1">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-4 p-4">
           {chat.messages.length === 0 && !chat.isStreaming && (
             <p className="text-sm text-muted-foreground">Ask a question about this repository&apos;s code.</p>
@@ -125,7 +124,7 @@ export function ChatPanel({ repoKey, onOpenCitation, activeCitation }: ChatPanel
           {chat.error && <p className="text-sm text-destructive">Error: {chat.error}</p>}
           <div ref={bottomRef} />
         </div>
-      </ScrollArea>
+      </div>
 
       <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t p-3">
         <Input

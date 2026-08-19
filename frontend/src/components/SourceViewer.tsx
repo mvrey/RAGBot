@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from 'react';
 import { FileCode2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { highlightLines, type HighlightedToken } from '@/lib/highlight';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -42,7 +41,7 @@ export function SourceViewer({ repoKey, target }: SourceViewerProps) {
   }, [data]);
 
   useEffect(() => {
-    highlightRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    highlightRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [lines]);
 
   if (!target) {
@@ -60,7 +59,7 @@ export function SourceViewer({ repoKey, target }: SourceViewerProps) {
         {target.path}
         {target.start && <span> — lines {target.start}-{target.end ?? target.start}</span>}
       </div>
-      <ScrollArea className="flex-1">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {isLoading && (
           <div className="space-y-2 p-4">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -96,7 +95,7 @@ export function SourceViewer({ repoKey, target }: SourceViewerProps) {
             })}
           </pre>
         )}
-      </ScrollArea>
+      </div>
     </div>
   );
 }
