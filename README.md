@@ -495,19 +495,34 @@ Technical backlog, roughly in the order I'd tackle it:
 
 ## Screenshots & demo
 
-> Add screenshots to `docs/screenshots/` and link them here. Worth capturing:
->
-> - The ingest dialog and its named-phase progress (`downloading → chunking → embedding → indexing → ready`)
-> - A chat answer with clickable `path:start-end` citation chips
-> - Clicking a citation opening the source viewer, scrolled to and highlighting the cited lines
-> - An answer where the agent's tool calls are visible as collapsible steps (`search_code`, `read_file`)
-> - The file tree, browsing the ingested repo directly
-> - Optionally a short screen recording of one end-to-end run
+**Demo:** [`docs/ragbot_demo.mp4`](docs/ragbot_demo.mp4): a short end-to-end run: ingest a repo, watch the
+named-phase progress, ask a question, follow a citation into the source.
 
-```
-![Pipeline complete](docs/screenshots/pipeline.png)
-![Cited answer](docs/screenshots/answer.png)
-```
+<video src="docs/ragbot_demo.mp4" controls width="720"></video>
+
+**Empty state**
+
+![Empty state, no repos ingested yet](docs/screenshots/home.png)
+
+**Ingest dialog** — GitHub URL, chunking strategy, search method
+
+![Ingest dialog](docs/screenshots/ingest1.png)
+
+**Named-phase ingest progress** — `downloading → chunking → embedding → indexing → ready`
+
+![Ingest progress](docs/screenshots/ingest2.png)
+
+**Chat with a cited answer**, source viewer and file tree open alongside
+
+![Chat with citation chip](docs/screenshots/chat.png)
+
+**Agent tool calls surfaced as collapsible steps** (`list_files`, `read_file`, ...)
+
+![Tool call steps](docs/screenshots/tools.png)
+
+**Repo details** — file/chunk counts, embedding model, per-file chunking breakdown
+
+![Repo details dialog](docs/screenshots/details.png)
 
 ---
 
