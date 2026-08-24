@@ -2,7 +2,6 @@
 name = "ragbot-backend"
 version = "0.1.0"
 description = "FastAPI backend for RAGBot: ingests a GitHub repository and answers questions about it"
-readme = "../README.md"
 requires-python = ">=3.13"
 dependencies = [
     "anyio>=4.0.0",
