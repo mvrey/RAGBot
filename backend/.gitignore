@@ -1,0 +1,33 @@
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Packaging / build
+/build/
+/dist/
+*.egg-info/
+.eggs/
+
+# Environments
+.env
+/.venv/
+env/
+venv/
+
+# Test / coverage
+/.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+cover/
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# RAGBot runtime data: downloaded repo cache, embedding index, interaction logs
+/data/
+/logs/
