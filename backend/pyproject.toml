@@ -9,6 +9,10 @@ dependencies = [
     "google-genai>=1.0.0",
     "minsearch>=0.0.5",
     "openai>=1.108.2",
+    # pydantic-ai-slim 1.0.9 still imports the OpenTelemetry Events API
+    # (opentelemetry._events), which was deprecated in otel 1.39 and removed
+    # in 1.44 - cap below the removal to avoid a hard ImportError.
+    "opentelemetry-api<1.44",
     "pydantic-ai-slim[openai,google]==1.0.9",
     "python-dotenv>=1.0.0",
     "python-frontmatter>=1.1.0",
