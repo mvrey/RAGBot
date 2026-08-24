@@ -9,6 +9,7 @@ from pydantic_ai.models.function import FunctionModel
 
 import ragbot.api.jobs as jobs_module
 import ragbot.api.routes.repos as repos_module
+import ragbot.core.AgentWrapper as agent_wrapper_module
 import ragbot.core.Repository as repository_module
 from ragbot.api.main import app
 from ragbot.api.state import AppState
@@ -53,12 +54,28 @@ class FakeEmbedder:
         return rng.random(8)
 
 
+async def _unused_stream_function(messages, agent_info):
+    yield "placeholder - individual tests replace agent.model before actually asking"
+
+
 @pytest.fixture(autouse=True)
 def fake_network(monkeypatch):
-    """No real download and no real embedding API calls in this file."""
+    """No real download, embedding, or LLM API calls in this file.
+
+    Every ingest builds a real AgentWrapper (jobs.py's _build_agent), which
+    constructs a pydantic_ai Agent from the default model string - that needs
+    a real provider API key just to construct, before any test gets a chance
+    to swap in its own FunctionModel for an actual /ask call. Handing it an
+    already-resolved FunctionModel here sidesteps provider/key resolution
+    entirely, the same way the ask tests replace agent.model post-construction.
+    """
     zip_bytes = _build_fake_zip()
     monkeypatch.setattr(repository_module.requests, 'get', lambda url: FakeResponse(zip_bytes))
     monkeypatch.setattr(jobs_module, 'get_embedder', lambda: FakeEmbedder())
+    monkeypatch.setattr(
+        agent_wrapper_module, 'get_model_name',
+        lambda: FunctionModel(stream_function=_unused_stream_function),
+    )
 
 
 @pytest.fixture
