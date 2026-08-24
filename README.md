@@ -56,8 +56,8 @@ python -m venv .venv
 pip install -e .                          # includes sentence-transformers/torch for the default local embedder
 cp .env.example .env                      # then edit .env and add GOOGLE_API_KEY
 
-python -m uvicorn ragbot.api.main:app --reload
-# or, without installing: uvicorn ragbot.api.main:app --reload --app-dir backend
+python -m uvicorn ragbot.api.main:app
+# or, without installing: uvicorn ragbot.api.main:app --app-dir backend
 ```
 
 **Frontend** (Node 22+), in a second terminal:
@@ -65,7 +65,6 @@ python -m uvicorn ragbot.api.main:app --reload
 ```bash
 cd frontend
 npm install
-cp .env.example .env.local                # NEXT_PUBLIC_API_URL=http://localhost:8000
 npm run dev
 ```
 
